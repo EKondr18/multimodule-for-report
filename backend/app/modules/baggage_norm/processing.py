@@ -125,6 +125,12 @@ def calculate_baggage_status(df: pd.DataFrame) -> pd.Series:
     later_than_arrival[marks_present] = (
         time_end_lenta[marks_present] > mc_arrive[marks_present]
     )
+    # На pandas 2.x присвоение булева подмассива в bool-Series по маске
+    # повышает dtype до object (Python bool вместо numpy bool_). bool — это
+    # подкласс int, поэтому последующий `~` делает побитовую инверсию
+    # (~True == -2, ~False == -1) — оба значения truthy, и has_marks/incorrect
+    # ломаются для всех строк. Принудительно возвращаем dtype bool.
+    later_than_arrival = later_than_arrival.astype(bool)
     has_marks = marks_present & later_than_arrival
 
     incorrect = (
