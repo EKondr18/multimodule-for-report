@@ -16,6 +16,7 @@ from app.modules.baggage_norm.processing import (
 router = APIRouter(prefix="/api/baggage-norm", tags=["baggage-norm"])
 
 MASTER_PATH = "data/baggage_norm/master.csv"
+DATALENS_PATH = "data/baggage_norm/datalens.csv"
 
 
 def _load_master() -> tuple[pd.DataFrame, str | None]:
@@ -33,6 +34,12 @@ def _datalens_rows(df_master: pd.DataFrame) -> list[dict]:
     if not datalens.empty:
         datalens["date"] = datalens["date"].dt.strftime("%Y-%m-%d")
     return datalens.to_dict(orient="records")
+
+
+def _save_datalens(df_master: pd.DataFrame, message: str) -> None:
+    datalens = derive_datalens(df_master)
+    _, sha = github_storage.read_file(DATALENS_PATH)
+    github_storage.write_file(DATALENS_PATH, datalens.to_csv(index=False), message=message, sha=sha)
 
 
 @router.get("/current")
@@ -55,12 +62,9 @@ async def process_weekly_file(file: UploadFile):
     df_master, sha = _load_master()
     combined = merge_with_master(df_master, df_new)
 
-    github_storage.write_file(
-        MASTER_PATH,
-        combined.to_csv(index=False),
-        message=f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)",
-        sha=sha,
-    )
+    commit_message = f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)"
+    github_storage.write_file(MASTER_PATH, combined.to_csv(index=False), message=commit_message, sha=sha)
+    _save_datalens(combined, message=commit_message)
 
     return {
         "rows": _datalens_rows(combined),
@@ -71,13 +75,12 @@ async def process_weekly_file(file: UploadFile):
 
 @router.get("/download")
 def download_datalens_csv():
-    df_master, _ = _load_master()
-    datalens = derive_datalens(df_master)
-    buffer = StringIO()
-    datalens.to_csv(buffer, index=False, encoding="utf-8")
-    buffer.seek(0)
+    content, _ = github_storage.read_file(DATALENS_PATH)
+    if content is None:
+        df_master, _ = _load_master()
+        content = derive_datalens(df_master).to_csv(index=False)
     return StreamingResponse(
-        iter([buffer.getvalue()]),
+        iter([content]),
         media_type="text/csv",
         headers={
             "Content-Disposition": 'attachment; filename="bagazh_dlya_datalens.csv"'
