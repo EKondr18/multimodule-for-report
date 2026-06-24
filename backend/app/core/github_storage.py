@@ -20,14 +20,23 @@ def _repo():
 
 
 def read_file(path: str) -> tuple[str | None, str | None]:
-    """Возвращает (содержимое, sha) или (None, None), если файла ещё нет."""
+    """Возвращает (содержимое, sha) или (None, None), если файла ещё нет.
+
+    Contents API отдаёт поле content пустым для файлов больше ~1 МБ — в этом
+    случае докачиваем содержимое через Git Blobs API (лимит там — 100 МБ).
+    """
+    repo = _repo()
     try:
-        content_file = _repo().get_contents(path, ref=GITHUB_BRANCH)
+        content_file = repo.get_contents(path, ref=GITHUB_BRANCH)
     except GithubException as exc:
         if exc.status == 404:
             return None, None
         raise
-    return b64decode(content_file.content).decode("utf-8"), content_file.sha
+    if content_file.content:
+        raw = content_file.content
+    else:
+        raw = repo.get_git_blob(content_file.sha).content
+    return b64decode(raw).decode("utf-8"), content_file.sha
 
 
 def write_file(path: str, content: str, message: str, sha: str | None = None) -> None:
