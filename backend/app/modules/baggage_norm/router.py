@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core import github_storage
 from app.modules.baggage_norm.processing import (
+    DATALENS_COLUMNS,
     derive_datalens,
     empty_master,
     merge_with_master,
@@ -29,23 +30,36 @@ def _load_master() -> tuple[pd.DataFrame, str | None]:
     return df, sha
 
 
-def _datalens_rows(df_master: pd.DataFrame) -> list[dict]:
-    datalens = derive_datalens(df_master).copy()
-    if not datalens.empty:
-        datalens["date"] = datalens["date"].dt.strftime("%Y-%m-%d")
+def _load_datalens() -> tuple[pd.DataFrame, str | None]:
+    content, sha = github_storage.read_file(DATALENS_PATH)
+    if content is None:
+        return pd.DataFrame(columns=DATALENS_COLUMNS), None
+    return pd.read_csv(StringIO(content)), sha
+
+
+def _rows(datalens: pd.DataFrame) -> list[dict]:
     return datalens.to_dict(orient="records")
 
 
-def _save_datalens(df_master: pd.DataFrame, message: str) -> None:
-    datalens = derive_datalens(df_master)
-    _, sha = github_storage.read_file(DATALENS_PATH)
-    github_storage.write_file(DATALENS_PATH, datalens.to_csv(index=False), message=message, sha=sha)
+def _append_to_datalens(df_new: pd.DataFrame, message: str) -> pd.DataFrame:
+    """Дописывает производные строки новой загрузки в общий накопительный
+    datalens.csv (не пересчитывает его из master.csv — иначе была бы потеряна
+    история, заведённая до появления приложения)."""
+    new_rows = derive_datalens(df_new).copy()
+    new_rows["date"] = new_rows["date"].dt.strftime("%Y-%m-%d")
+
+    existing, sha = _load_datalens()
+    combined = pd.concat([existing, new_rows], ignore_index=True).drop_duplicates()
+    combined = combined.sort_values("date").reset_index(drop=True)
+
+    github_storage.write_file(DATALENS_PATH, combined.to_csv(index=False), message=message, sha=sha)
+    return combined
 
 
 @router.get("/current")
 def get_current():
-    df_master, _ = _load_master()
-    return {"rows": _datalens_rows(df_master), "total": len(df_master)}
+    datalens, _ = _load_datalens()
+    return {"rows": _rows(datalens), "total": len(datalens)}
 
 
 @router.post("/process")
@@ -60,16 +74,16 @@ async def process_weekly_file(file: UploadFile):
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
     df_master, sha = _load_master()
-    combined = merge_with_master(df_master, df_new)
+    combined_master = merge_with_master(df_master, df_new)
 
     commit_message = f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)"
-    github_storage.write_file(MASTER_PATH, combined.to_csv(index=False), message=commit_message, sha=sha)
-    _save_datalens(combined, message=commit_message)
+    github_storage.write_file(MASTER_PATH, combined_master.to_csv(index=False), message=commit_message, sha=sha)
+    datalens = _append_to_datalens(df_new, message=commit_message)
 
     return {
-        "rows": _datalens_rows(combined),
+        "rows": _rows(datalens),
         "added": len(df_new),
-        "total": len(combined),
+        "total": len(datalens),
     }
 
 
