@@ -4,18 +4,21 @@
 На вход — до трёх независимо загружаемых excel-файлов: «Нарушения на
 перроне», «Нарушения в АВК» (лист «ТАБЛИЦА» в каждом, с разным регистром
 колонки даты — «Дата»/«дата» — и разным набором остальных колонок) и
-«Проверки GRH» (лист «РПО»). Каждая таблица строится из того, что
-загружено; если для неё не хватает нужного файла — вместо данных
-выводится отметка `NOT_UPLOADED` ("Файл не загружен"), на уровне всей
-таблицы (1, 1.1, 2, 2.1) либо на уровне отдельных ячеек, если в одной
-таблице разные колонки зависят от разных файлов (3).
+«Проверки GRH» (листы «РПО» и «ФО и СИЗ» — по одному на каждую из таблиц
+3 и 4). Каждая таблица строится из того, что загружено; если для неё не
+хватает нужного файла/листа — вместо данных выводится отметка
+`NOT_UPLOADED` ("Файл не загружен"), на уровне всей таблицы (1, 1.1, 2,
+2.1, 5) либо на уровне отдельных ячеек, если в одной таблице разные
+колонки зависят от разных файлов (3, 4).
 
 Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
 (1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
-(только файл «Перрон») — дополнительно подкатегория и причина; для
-таблицы 3 — подкатегория и заключение (файл «Перрон») плюс дата из файла
-GRH. Строки в детализирующих таблицах сортируются по дате от старых к
-новым.
+(только файл «Перрон») — дополнительно подкатегория и причина; для таблиц
+3 и 4 — подкатегория и заключение (файл «Перрон») плюс дата из
+соответствующего листа файла GRH; для таблицы 5 (только файл «Перрон») —
+описание, место, бортовой номер, исполнитель и подразделение. Строки в
+детализирующих и списочных таблицах (1.1, 2.1, 5) сортируются по дате от
+старых к новым.
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
@@ -29,6 +32,7 @@ import pandas as pd
 
 VIOLATIONS_SHEET = "ТАБЛИЦА"
 RPO_CHECKS_SHEET = "РПО"
+FO_SIZ_CHECKS_SHEET = "ФО и СИЗ"
 
 GRANULARITIES = {"week", "month", "quarter", "year"}
 
@@ -42,7 +46,13 @@ REASON_OUT_OF_VIEW = "Невозможно оценить (вне ракурса
 REASON_AOOPO = "Вина АООПО"
 
 RPO_SUBCATEGORY = "Руководство подъездом /отъездом;"
-RPO_CONCLUSION = "с виной"
+
+FO_CATEGORY = "Нарушение ФО, этики"
+FO_SUBCATEGORIES = {"Нарушение ФО", "Нарушение элементов корпоративного стиля"}
+
+WITH_FAULT_CONCLUSION = "с виной"
+
+SAFETY_CATEGORY = "Техника безопасности, охраны труда"
 
 NOT_UPLOADED = "Файл не загружен"
 
@@ -70,6 +80,8 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     executor_col = _find_column(columns, "исполнитель")
     department_col = _find_column(columns, "подразделение")
     conclusion_col = _find_column(columns, "заключение")
+    place_col = _find_column(columns, "место")
+    tail_number_col = _find_column(columns, "б/н")
 
     rename = {date_col: "date", category_col: "category"}
     keep = [date_col, category_col]
@@ -80,6 +92,8 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
         (executor_col, "executor"),
         (department_col, "department"),
         (conclusion_col, "conclusion"),
+        (place_col, "place"),
+        (tail_number_col, "tail_number"),
     ):
         if col is not None:
             rename[col] = key
@@ -89,7 +103,16 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     result = result.dropna(subset=["date"])
     result["category"] = result["category"].astype(str).str.strip()
-    for key in ("subcategory", "reason", "description", "executor", "department", "conclusion"):
+    for key in (
+        "subcategory",
+        "reason",
+        "description",
+        "executor",
+        "department",
+        "conclusion",
+        "place",
+        "tail_number",
+    ):
         if key not in result.columns:
             result[key] = None
         else:
@@ -98,13 +121,16 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     return result
 
 
-def read_rpo_checks_file(file_obj: BytesIO) -> pd.DataFrame:
-    df = pd.read_excel(file_obj, sheet_name=RPO_CHECKS_SHEET)
-    columns = list(df.columns)
+def read_grh_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | None:
+    xl = pd.ExcelFile(file_obj)
+    if sheet_name not in xl.sheet_names:
+        return None
 
+    df = xl.parse(sheet_name)
+    columns = list(df.columns)
     date_col = _find_column(columns, "дата")
     if date_col is None:
-        raise ValueError("В файле проверок РПО нет колонки «Дата»")
+        raise ValueError(f"На листе «{sheet_name}» файла GRH нет колонки «Дата»")
 
     result = df[[date_col]].rename(columns={date_col: "date"})
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
@@ -249,28 +275,39 @@ def build_alcohol_detail(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestam
     return _detail_rows(in_period)
 
 
-def build_checks_table(
-    df_grh: pd.DataFrame | None,
+def _rpo_complaints_filter(df_perron: pd.DataFrame) -> pd.DataFrame:
+    return df_perron[
+        (df_perron["subcategory"] == RPO_SUBCATEGORY) & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
+    ]
+
+
+def _fo_siz_complaints_filter(df_perron: pd.DataFrame) -> pd.DataFrame:
+    return df_perron[
+        (df_perron["category"] == FO_CATEGORY)
+        & (df_perron["subcategory"].isin(FO_SUBCATEGORIES))
+        & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
+    ]
+
+
+def build_monitoring_table(
+    df_checks: pd.DataFrame | None,
     df_perron: pd.DataFrame | None,
+    complaints_filter,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
 ) -> list[dict]:
     buckets = generate_buckets(start, end, granularity)
 
-    complaints = None
-    if df_perron is not None:
-        complaints = df_perron[
-            (df_perron["subcategory"] == RPO_SUBCATEGORY) & (df_perron["conclusion"] == RPO_CONCLUSION)
-        ]
+    complaints = complaints_filter(df_perron) if df_perron is not None else None
 
     rows = []
     for bucket_start, bucket_end in buckets:
         row = {"Период": _format_period(bucket_start, bucket_end, granularity)}
-        if df_grh is None:
+        if df_checks is None:
             row["Кол-во проверок"] = NOT_UPLOADED
         else:
-            in_bucket = df_grh[(df_grh["date"] >= bucket_start) & (df_grh["date"] <= bucket_end)]
+            in_bucket = df_checks[(df_checks["date"] >= bucket_start) & (df_checks["date"] <= bucket_end)]
             row["Кол-во проверок"] = int(len(in_bucket))
         if complaints is None:
             row["Кол-во замечаний"] = NOT_UPLOADED
@@ -281,6 +318,35 @@ def build_checks_table(
     return rows
 
 
+def _format_place(place, tail_number) -> str:
+    place_text = _str_or_blank(place)
+    tail_text = _str_or_blank(tail_number)
+    if place_text.endswith(".0") and place_text[:-2].isdigit():
+        place_text = place_text[:-2]
+    if place_text.isdigit():
+        place_text = f"МС{place_text}"
+    return " ".join(part for part in (place_text, tail_text) if part)
+
+
+def build_safety_violations_table(
+    df_perron: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+) -> list[dict]:
+    in_period = df_perron[
+        (df_perron["date"] >= start) & (df_perron["date"] <= end) & (df_perron["category"] == SAFETY_CATEGORY)
+    ]
+    return [
+        {
+            "Дата": row["date"].strftime("%d.%m.%Y"),
+            "Категория": row["category"],
+            "Описание": _str_or_blank(row["description"]),
+            "Место": _format_place(row["place"], row["tail_number"]),
+            "Исполнитель": _str_or_blank(row["executor"]),
+            "Подразделение": _str_or_blank(row["department"]),
+        }
+        for _, row in in_period.sort_values("date").iterrows()
+    ]
+
+
 def _not_uploaded_table(table_id: str, title: str, columns: list[str]) -> dict:
     return {"id": table_id, "title": title, "columns": columns, "message": NOT_UPLOADED, "rows": []}
 
@@ -288,7 +354,8 @@ def _not_uploaded_table(table_id: str, title: str, columns: list[str]) -> dict:
 def build_quality_tables(
     df_perron: pd.DataFrame | None,
     df_avk: pd.DataFrame | None,
-    df_grh: pd.DataFrame | None,
+    df_grh_rpo: pd.DataFrame | None,
+    df_grh_fo_siz: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
@@ -339,11 +406,41 @@ def build_quality_tables(
             "installation_aoopo_detail", "2.1. Вина АООПО — детализация", detail_columns
         )
 
-    checks_table = {
+    monitoring_columns = ["Период", "Кол-во проверок", "Кол-во замечаний"]
+
+    rpo_table = {
         "id": "rpo_checks",
         "title": "3. Мониторинг корректности процедур РПО",
-        "columns": ["Период", "Кол-во проверок", "Кол-во замечаний"],
-        "rows": build_checks_table(df_grh, df_perron, start, end, granularity),
+        "columns": monitoring_columns,
+        "rows": build_monitoring_table(df_grh_rpo, df_perron, _rpo_complaints_filter, start, end, granularity),
     }
 
-    return [alcohol_table, alcohol_detail_table, installation_table, installation_detail_table, checks_table]
+    fo_siz_table = {
+        "id": "fo_siz_checks",
+        "title": "4. Мониторинг ношения ФО и СИЗ",
+        "columns": monitoring_columns,
+        "rows": build_monitoring_table(df_grh_fo_siz, df_perron, _fo_siz_complaints_filter, start, end, granularity),
+    }
+
+    safety_columns = ["Дата", "Категория", "Описание", "Место", "Исполнитель", "Подразделение"]
+    if df_perron is not None:
+        safety_table = {
+            "id": "safety_violations",
+            "title": "5. Нарушения техники безопасности и охраны труда",
+            "columns": safety_columns,
+            "rows": build_safety_violations_table(df_perron, start, end),
+        }
+    else:
+        safety_table = _not_uploaded_table(
+            "safety_violations", "5. Нарушения техники безопасности и охраны труда", safety_columns
+        )
+
+    return [
+        alcohol_table,
+        alcohol_detail_table,
+        installation_table,
+        installation_detail_table,
+        rpo_table,
+        fo_siz_table,
+        safety_table,
+    ]

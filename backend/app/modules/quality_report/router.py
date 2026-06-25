@@ -4,9 +4,11 @@ import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.modules.quality_report.processing import (
+    FO_SIZ_CHECKS_SHEET,
     GRANULARITIES,
+    RPO_CHECKS_SHEET,
     build_quality_tables,
-    read_rpo_checks_file,
+    read_grh_checks_sheet,
     read_violations_file,
 )
 
@@ -40,7 +42,8 @@ async def quality_summary(
 
     df_perron = None
     df_avk = None
-    df_grh = None
+    df_grh_rpo = None
+    df_grh_fo_siz = None
 
     try:
         if perron_file is not None and perron_file.filename:
@@ -51,11 +54,15 @@ async def quality_summary(
             df_avk = read_violations_file(BytesIO(await avk_file.read()))
         if grh_file is not None and grh_file.filename:
             _check_excel_filename(grh_file, "Проверки GRH")
-            df_grh = read_rpo_checks_file(BytesIO(await grh_file.read()))
+            grh_raw = await grh_file.read()
+            df_grh_rpo = read_grh_checks_sheet(BytesIO(grh_raw), RPO_CHECKS_SHEET)
+            df_grh_fo_siz = read_grh_checks_sheet(BytesIO(grh_raw), FO_SIZ_CHECKS_SHEET)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
-    tables = build_quality_tables(df_perron, df_avk, df_grh, start, end, granularity)
+    tables = build_quality_tables(
+        df_perron, df_avk, df_grh_rpo, df_grh_fo_siz, start, end, granularity
+    )
     return {"tables": tables}
