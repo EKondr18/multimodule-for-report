@@ -28,7 +28,11 @@
 схлопываются в одно каноническое имя (см. `_canonicalize_agent_names`):
 сначала группировка по «очищенному» от лишних пробелов и регистра
 варианту, затем — слияние похожих вариантов (опечатки) по строковому
-сходству (`difflib`).
+сходству (`difflib`). Строки без ФИО (например, из-за объединённых ячеек
+в исходном файле) не отбрасываются из таблицы 6 — «Кол-во проверок» считает
+все строки с валидной датой за период независимо от наличия ФИО; такие
+строки просто не попадают в таблицы 6.1/6.2, где группировка идёт по
+сотруднику.
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
@@ -233,9 +237,9 @@ def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
     result = result.dropna(subset=["date"])
 
     result["agent_raw"] = result["agent_raw"].apply(_clean_agent_name)
-    result = result.dropna(subset=["agent_raw"])
 
-    canonical_map = _canonicalize_agent_names(result["agent_raw"])
+    named = result.dropna(subset=["agent_raw"])
+    canonical_map = _canonicalize_agent_names(named["agent_raw"])
     result["agent"] = result["agent_raw"].map(canonical_map)
 
     result["reason_description"] = result["reason_description"].apply(
