@@ -31,14 +31,19 @@ export default function QualityReportPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  const [violationsTables, setViolationsTables] = useState<SummaryTableData[]>([]);
+  const [violationsTablesByGranularity, setViolationsTablesByGranularity] = useState<
+    Partial<Record<Granularity, SummaryTableData[]>>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const violationsTables = violationsTablesByGranularity[granularity] ?? [];
+
   const changeGranularity = (next: Granularity) => {
     setGranularity(next);
-    setViolationsTables([]);
   };
+
+  const invalidateViolationsCache = () => setViolationsTablesByGranularity({});
 
   const handleBuildViolations = async () => {
     if (!perronFile || !avkFile || !startDate || !endDate) return;
@@ -46,7 +51,7 @@ export default function QualityReportPage() {
     setError(null);
     try {
       const result = await fetchViolationsSummary(perronFile, avkFile, startDate, endDate, granularity);
-      setViolationsTables(result.tables);
+      setViolationsTablesByGranularity((prev) => ({ ...prev, [granularity]: result.tables }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -62,12 +67,28 @@ export default function QualityReportPage() {
         <div className="upload-grid">
           <div className="upload-item">
             <h4>1. Нарушения на перроне</h4>
-            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setPerronFile} />
+            <FileUpload
+              compact
+              accept=".xlsx,.xls"
+              label="Перетащите файл или нажмите"
+              onFile={(f) => {
+                setPerronFile(f);
+                invalidateViolationsCache();
+              }}
+            />
             {perronFile && <div className="status-msg">{perronFile.name}</div>}
           </div>
           <div className="upload-item">
             <h4>2. Нарушения в АВК</h4>
-            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setAvkFile} />
+            <FileUpload
+              compact
+              accept=".xlsx,.xls"
+              label="Перетащите файл или нажмите"
+              onFile={(f) => {
+                setAvkFile(f);
+                invalidateViolationsCache();
+              }}
+            />
             {avkFile && <div className="status-msg">{avkFile.name}</div>}
           </div>
           <div className="upload-item">
@@ -93,11 +114,25 @@ export default function QualityReportPage() {
         <div className="period-row">
           <label>
             С
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                invalidateViolationsCache();
+              }}
+            />
           </label>
           <label>
             По
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                invalidateViolationsCache();
+              }}
+            />
           </label>
         </div>
       </div>
