@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.modules.baggage_comments.router import router as baggage_comments_router
 from app.modules.baggage_norm.router import router as baggage_norm_router
 
 app = FastAPI(title="Отчёты — мультимодульное приложение")
@@ -13,6 +14,7 @@ app.add_middleware(
 )
 
 app.include_router(baggage_norm_router)
+app.include_router(baggage_comments_router)
 
 
 @app.get("/api/health")

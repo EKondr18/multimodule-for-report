@@ -3,9 +3,16 @@ import { useRef, useState } from "react";
 interface Props {
   onFile: (file: File) => void;
   disabled?: boolean;
+  accept?: string;
+  label?: string;
 }
 
-export default function FileUpload({ onFile, disabled }: Props) {
+export default function FileUpload({
+  onFile,
+  disabled,
+  accept = ".xlsx,.xls",
+  label = "Перетащите xlsx-файл за неделю сюда или нажмите, чтобы выбрать",
+}: Props) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -32,12 +39,12 @@ export default function FileUpload({ onFile, disabled }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept={accept}
         hidden
         disabled={disabled}
         onChange={(e) => handleFiles(e.target.files)}
       />
-      Перетащите xlsx-файл за неделю сюда или нажмите, чтобы выбрать
+      {label}
     </div>
   );
 }

@@ -80,6 +80,21 @@ body {
   cursor: not-allowed;
 }
 
+.station-switch {
+  display: flex;
+  gap: 8px;
+}
+
+.station-switch .btn {
+  background: #e5e7eb;
+  color: #1f2937;
+}
+
+.station-switch .btn.active {
+  background: #2563eb;
+  color: #fff;
+}
+
 table.preview {
   width: 100%;
   border-collapse: collapse;
