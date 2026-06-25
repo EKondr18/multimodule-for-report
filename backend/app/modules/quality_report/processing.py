@@ -193,6 +193,7 @@ def _str_or_blank(value) -> str:
 def _detail_rows(df: pd.DataFrame) -> list[dict]:
     return [
         {
+            "Дата": row["date"].strftime("%d.%m.%Y"),
             "Описание": _str_or_blank(row["description"]),
             "Исполнитель": _str_or_blank(row["executor"]),
             "Подразделение": _str_or_blank(row["department"]),
@@ -230,7 +231,7 @@ def build_violations_tables(
     installation_rows = build_installation_table(df_perron, start, end, granularity)
     installation_aoopo_rows = build_installation_aoopo_detail(df_perron, start, end)
 
-    detail_columns = ["Описание", "Исполнитель", "Подразделение"]
+    detail_columns = ["Дата", "Описание", "Исполнитель", "Подразделение"]
 
     return [
         {
