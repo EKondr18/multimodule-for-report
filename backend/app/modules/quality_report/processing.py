@@ -2,9 +2,9 @@
 
 На вход — выгрузки нарушений по перрону и АВК (лист «ТАБЛИЦА» в каждом
 файле, с разным регистром колонки даты — «Дата»/«дата» — и разным набором
-остальных колонок). Для таблицы 1 нужны только дата и категория нарушения;
-для таблицы 2 (только файл «Перрон») — также подкатегория, причина,
-описание и исполнитель.
+остальных колонок). Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
+(1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
+(только файл «Перрон») — дополнительно подкатегория и причина.
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
@@ -51,6 +51,7 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     reason_col = _find_column(columns, "причина")
     description_col = _find_column(columns, "описание")
     executor_col = _find_column(columns, "исполнитель")
+    department_col = _find_column(columns, "подразделение")
 
     rename = {date_col: "date", category_col: "category"}
     keep = [date_col, category_col]
@@ -59,6 +60,7 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
         (reason_col, "reason"),
         (description_col, "description"),
         (executor_col, "executor"),
+        (department_col, "department"),
     ):
         if col is not None:
             rename[col] = key
@@ -68,7 +70,7 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     result = result.dropna(subset=["date"])
     result["category"] = result["category"].astype(str).str.strip()
-    for key in ("subcategory", "reason", "description", "executor"):
+    for key in ("subcategory", "reason", "description", "executor", "department"):
         if key not in result.columns:
             result[key] = None
         else:
@@ -184,18 +186,34 @@ def build_installation_table(
     return rows
 
 
+def _str_or_blank(value) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _detail_rows(df: pd.DataFrame) -> list[dict]:
+    return [
+        {
+            "Описание": _str_or_blank(row["description"]),
+            "Исполнитель": _str_or_blank(row["executor"]),
+            "Подразделение": _str_or_blank(row["department"]),
+        }
+        for _, row in df.iterrows()
+    ]
+
+
 def build_installation_aoopo_detail(
     df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
 ) -> list[dict]:
     in_period = _installation_subset(df, start, end)
     aoopo = in_period[in_period["reason_bucket"] == REASON_AOOPO]
-    return [
-        {
-            "Описание": row["description"] if isinstance(row["description"], str) else "",
-            "Исполнитель": row["executor"] if isinstance(row["executor"], str) else "",
-        }
-        for _, row in aoopo.iterrows()
+    return _detail_rows(aoopo)
+
+
+def build_alcohol_detail(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> list[dict]:
+    in_period = df[
+        (df["date"] >= start) & (df["date"] <= end) & (df["category"] == ALCOHOL_CATEGORY)
     ]
+    return _detail_rows(in_period)
 
 
 def build_violations_tables(
@@ -208,8 +226,11 @@ def build_violations_tables(
     combined = pd.concat([df_perron, df_avk], ignore_index=True)
 
     alcohol_rows = build_category_count_table(combined, ALCOHOL_CATEGORY, start, end, granularity)
+    alcohol_detail_rows = build_alcohol_detail(combined, start, end)
     installation_rows = build_installation_table(df_perron, start, end, granularity)
     installation_aoopo_rows = build_installation_aoopo_detail(df_perron, start, end)
+
+    detail_columns = ["Описание", "Исполнитель", "Подразделение"]
 
     return [
         {
@@ -217,6 +238,12 @@ def build_violations_tables(
             "title": "1. Алкогольное/наркотическое опьянение",
             "columns": ["Период", "Кол-во"],
             "rows": alcohol_rows,
+        },
+        {
+            "id": "alcohol_detail",
+            "title": "1.1. Алкогольное/наркотическое опьянение — детализация",
+            "columns": detail_columns,
+            "rows": alcohol_detail_rows,
         },
         {
             "id": "installation",
@@ -227,7 +254,7 @@ def build_violations_tables(
         {
             "id": "installation_aoopo_detail",
             "title": "2.1. Вина АООПО — детализация",
-            "columns": ["Описание", "Исполнитель"],
+            "columns": detail_columns,
             "rows": installation_aoopo_rows,
         },
     ]
