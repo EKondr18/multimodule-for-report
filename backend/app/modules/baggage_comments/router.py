@@ -73,15 +73,14 @@ async def process_files(
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
     merged = merge_tbs(df_flights, df_events)
-    totals = {
-        col: int(merged[col].sum())
-        for col in TBS_OUTPUT_COLUMNS
-        if col not in ("Дата рейса", "Номер рейса")
-    }
+    count_columns = [col for col in TBS_OUTPUT_COLUMNS if col not in ("Дата рейса", "Номер рейса")]
+    totals = {col: int(merged[col].sum()) for col in count_columns}
+
+    download_rows = merged[(merged[count_columns] != 0).any(axis=1)]
 
     return {
         "rows": merged.to_dict(orient="records"),
         "total": len(merged),
         "totals": totals,
-        "xlsx_base64": _to_xlsx_base64(merged),
+        "xlsx_base64": _to_xlsx_base64(download_rows),
     }
