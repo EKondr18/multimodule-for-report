@@ -5,8 +5,8 @@
 перроне», «Нарушения в АВК» (лист «ТАБЛИЦА» в каждом, с разным регистром
 колонки даты — «Дата»/«дата» — и разным набором остальных колонок),
 «Проверки GRH» (листы «РПО» и «ФО и СИЗ» — по одному на каждую из таблиц
-3 и 4) и «Мониторинг LIR/СЗВ» (колонки «Дата», «ФИО Агента», «Описание
-причины замечания» — для таблиц 6, 6.1, 6.2). Каждая таблица строится из
+3 и 4) и «Мониторинг LIR/СЗВ» (лист «LIR СЗВ 2026», колонки «Дата», «ФИО
+Агента», «Описание причины замечания» — для таблиц 6, 6.1, 6.2). Каждая таблица строится из
 того, что загружено; если для неё не хватает нужного файла/листа — вместо
 данных выводится отметка `NOT_UPLOADED` ("Файл не загружен"), на уровне
 всей таблицы (1, 1.1, 2, 2.1, 5, 6, 6.1, 6.2) либо на уровне отдельных
@@ -47,6 +47,7 @@ import pandas as pd
 VIOLATIONS_SHEET = "ТАБЛИЦА"
 RPO_CHECKS_SHEET = "РПО"
 FO_SIZ_CHECKS_SHEET = "ФО и СИЗ"
+LIR_SZV_SHEET = "LIR СЗВ 2026"
 
 GRANULARITIES = {"week", "month", "quarter", "year"}
 
@@ -210,7 +211,10 @@ def _canonicalize_agent_names(names: pd.Series) -> dict[str, str]:
 
 
 def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
-    df = pd.read_excel(file_obj)
+    xl = pd.ExcelFile(file_obj)
+    if LIR_SZV_SHEET not in xl.sheet_names:
+        raise ValueError(f"В файле «Мониторинг LIR/СЗВ» нет листа «{LIR_SZV_SHEET}»")
+    df = xl.parse(LIR_SZV_SHEET)
     columns = list(df.columns)
 
     date_col = _find_column(columns, "дата") or _find_column_contains(columns, "дата")
