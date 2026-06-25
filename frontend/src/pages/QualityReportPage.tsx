@@ -1,15 +1,7 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
 import SummaryTable from "../components/SummaryTable";
-import { Granularity, SummaryTable as SummaryTableData, fetchViolationsSummary } from "../api/qualityReport";
-
-type Section = "violations" | "checks" | "monitoring";
-
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: "violations", label: "Нарушения" },
-  { id: "checks", label: "Проверки" },
-  { id: "monitoring", label: "Мониторинг LIR/СЗВ" },
-];
+import { Granularity, SummaryTable as SummaryTableData, fetchQualitySummary } from "../api/qualityReport";
 
 const GRANULARITIES: { id: Granularity; label: string }[] = [
   { id: "week", label: "Неделя" },
@@ -19,7 +11,6 @@ const GRANULARITIES: { id: Granularity; label: string }[] = [
 ];
 
 export default function QualityReportPage() {
-  const [section, setSection] = useState<Section>("violations");
   const [granularity, setGranularity] = useState<Granularity>("week");
 
   const [perronFile, setPerronFile] = useState<File | null>(null);
@@ -31,27 +22,28 @@ export default function QualityReportPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  const [violationsTablesByGranularity, setViolationsTablesByGranularity] = useState<
+  const [tablesByGranularity, setTablesByGranularity] = useState<
     Partial<Record<Granularity, SummaryTableData[]>>
   >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const violationsTables = violationsTablesByGranularity[granularity] ?? [];
+  const tables = tablesByGranularity[granularity] ?? [];
 
-  const changeGranularity = (next: Granularity) => {
-    setGranularity(next);
-  };
+  const invalidateCache = () => setTablesByGranularity({});
 
-  const invalidateViolationsCache = () => setViolationsTablesByGranularity({});
-
-  const handleBuildViolations = async () => {
-    if (!perronFile || !avkFile || !startDate || !endDate) return;
+  const handleBuild = async () => {
+    if (!startDate || !endDate) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchViolationsSummary(perronFile, avkFile, startDate, endDate, granularity);
-      setViolationsTablesByGranularity((prev) => ({ ...prev, [granularity]: result.tables }));
+      const result = await fetchQualitySummary(
+        { perron: perronFile, avk: avkFile, grh: grhFile },
+        startDate,
+        endDate,
+        granularity
+      );
+      setTablesByGranularity((prev) => ({ ...prev, [granularity]: result.tables }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -73,7 +65,7 @@ export default function QualityReportPage() {
               label="Перетащите файл или нажмите"
               onFile={(f) => {
                 setPerronFile(f);
-                invalidateViolationsCache();
+                invalidateCache();
               }}
             />
             {perronFile && <div className="status-msg">{perronFile.name}</div>}
@@ -86,7 +78,7 @@ export default function QualityReportPage() {
               label="Перетащите файл или нажмите"
               onFile={(f) => {
                 setAvkFile(f);
-                invalidateViolationsCache();
+                invalidateCache();
               }}
             />
             {avkFile && <div className="status-msg">{avkFile.name}</div>}
@@ -98,7 +90,15 @@ export default function QualityReportPage() {
           </div>
           <div className="upload-item">
             <h4>4. Проверки GRH</h4>
-            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setGrhFile} />
+            <FileUpload
+              compact
+              accept=".xlsx,.xls"
+              label="Перетащите файл или нажмите"
+              onFile={(f) => {
+                setGrhFile(f);
+                invalidateCache();
+              }}
+            />
             {grhFile && <div className="status-msg">{grhFile.name}</div>}
           </div>
           <div className="upload-item">
@@ -110,7 +110,7 @@ export default function QualityReportPage() {
       </div>
 
       <div className="card">
-        <h3>6. Период</h3>
+        <h3>Период</h3>
         <div className="period-row">
           <label>
             С
@@ -119,7 +119,7 @@ export default function QualityReportPage() {
               value={startDate}
               onChange={(e) => {
                 setStartDate(e.target.value);
-                invalidateViolationsCache();
+                invalidateCache();
               }}
             />
           </label>
@@ -130,7 +130,7 @@ export default function QualityReportPage() {
               value={endDate}
               onChange={(e) => {
                 setEndDate(e.target.value);
-                invalidateViolationsCache();
+                invalidateCache();
               }}
             />
           </label>
@@ -139,68 +139,33 @@ export default function QualityReportPage() {
 
       <div className="card">
         <div className="station-switch">
-          {SECTIONS.map((s) => (
+          {GRANULARITIES.map((g) => (
             <button
-              key={s.id}
-              className={section === s.id ? "btn active" : "btn"}
-              onClick={() => setSection(s.id)}
+              key={g.id}
+              className={granularity === g.id ? "btn active" : "btn"}
+              onClick={() => setGranularity(g.id)}
             >
-              {s.label}
+              {g.label}
             </button>
           ))}
         </div>
-      </div>
 
-      {section === "violations" && (
-        <div className="card">
-          <h3>Нарушения</h3>
-          <div className="station-switch">
-            {GRANULARITIES.map((g) => (
-              <button
-                key={g.id}
-                className={granularity === g.id ? "btn active" : "btn"}
-                onClick={() => changeGranularity(g.id)}
-              >
-                {g.label}
-              </button>
+        <div style={{ marginTop: 16 }}>
+          <button className="btn" onClick={handleBuild} disabled={!startDate || !endDate || loading}>
+            Сформировать
+          </button>
+          {loading && <div className="status-msg">Обработка файлов…</div>}
+          {error && <div className="status-msg error">{error}</div>}
+        </div>
+
+        {tables.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            {tables.map((table) => (
+              <SummaryTable key={table.id} table={table} />
             ))}
           </div>
-
-          <div style={{ marginTop: 16 }}>
-            <button
-              className="btn"
-              onClick={handleBuildViolations}
-              disabled={!perronFile || !avkFile || !startDate || !endDate || loading}
-            >
-              Сформировать
-            </button>
-            {loading && <div className="status-msg">Обработка файлов…</div>}
-            {error && <div className="status-msg error">{error}</div>}
-          </div>
-
-          {violationsTables.length > 0 && (
-            <div style={{ marginTop: 24 }}>
-              {violationsTables.map((table) => (
-                <SummaryTable key={table.id} table={table} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {section === "checks" && (
-        <div className="card">
-          <h3>Проверки</h3>
-          <div className="status-msg">Раздел «Проверки» в разработке.</div>
-        </div>
-      )}
-
-      {section === "monitoring" && (
-        <div className="card">
-          <h3>Мониторинг LIR/СЗВ</h3>
-          <div className="status-msg">Раздел «Мониторинг LIR/СЗВ» в разработке.</div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

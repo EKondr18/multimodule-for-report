@@ -1,31 +1,34 @@
 from io import BytesIO
 
 import pandas as pd
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.modules.quality_report.processing import (
     GRANULARITIES,
-    build_violations_tables,
+    build_quality_tables,
+    read_rpo_checks_file,
     read_violations_file,
 )
 
 router = APIRouter(prefix="/api/quality-report", tags=["quality-report"])
 
 
-@router.post("/violations")
-async def violations_summary(
-    perron_file: UploadFile,
-    avk_file: UploadFile,
+def _check_excel_filename(file: UploadFile, label: str) -> None:
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, f"«{label}» — ожидается excel-файл")
+
+
+@router.post("/summary")
+async def quality_summary(
+    perron_file: UploadFile | None = File(None),
+    avk_file: UploadFile | None = File(None),
+    grh_file: UploadFile | None = File(None),
     start_date: str = Form(...),
     end_date: str = Form(...),
     granularity: str = Form(...),
 ):
     if granularity not in GRANULARITIES:
         raise HTTPException(400, f"Неизвестный временной срез: {granularity}")
-    if not perron_file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "«Нарушения на перроне» — ожидается excel-файл")
-    if not avk_file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "«Нарушения в АВК» — ожидается excel-файл")
 
     try:
         start = pd.to_datetime(start_date)
@@ -35,15 +38,24 @@ async def violations_summary(
     if start > end:
         raise HTTPException(400, "Дата начала периода позже даты окончания")
 
-    perron_raw = await perron_file.read()
-    avk_raw = await avk_file.read()
+    df_perron = None
+    df_avk = None
+    df_grh = None
+
     try:
-        df_perron = read_violations_file(BytesIO(perron_raw))
-        df_avk = read_violations_file(BytesIO(avk_raw))
+        if perron_file is not None and perron_file.filename:
+            _check_excel_filename(perron_file, "Нарушения на перроне")
+            df_perron = read_violations_file(BytesIO(await perron_file.read()))
+        if avk_file is not None and avk_file.filename:
+            _check_excel_filename(avk_file, "Нарушения в АВК")
+            df_avk = read_violations_file(BytesIO(await avk_file.read()))
+        if grh_file is not None and grh_file.filename:
+            _check_excel_filename(grh_file, "Проверки GRH")
+            df_grh = read_rpo_checks_file(BytesIO(await grh_file.read()))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
-    tables = build_violations_tables(df_perron, df_avk, start, end, granularity)
+    tables = build_quality_tables(df_perron, df_avk, df_grh, start, end, granularity)
     return {"tables": tables}

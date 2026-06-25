@@ -1,10 +1,21 @@
-"""Обработка модуля «Отчёт по качеству», раздел «Нарушения».
+"""Обработка модуля «Отчёт по качеству» — единый набор таблиц без разделения
+на разделы Нарушения/Проверки/Мониторинг.
 
-На вход — выгрузки нарушений по перрону и АВК (лист «ТАБЛИЦА» в каждом
-файле, с разным регистром колонки даты — «Дата»/«дата» — и разным набором
-остальных колонок). Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
+На вход — до трёх независимо загружаемых excel-файлов: «Нарушения на
+перроне», «Нарушения в АВК» (лист «ТАБЛИЦА» в каждом, с разным регистром
+колонки даты — «Дата»/«дата» — и разным набором остальных колонок) и
+«Проверки GRH» (лист «РПО»). Каждая таблица строится из того, что
+загружено; если для неё не хватает нужного файла — вместо данных
+выводится отметка `NOT_UPLOADED` ("Файл не загружен"), на уровне всей
+таблицы (1, 1.1, 2, 2.1) либо на уровне отдельных ячеек, если в одной
+таблице разные колонки зависят от разных файлов (3).
+
+Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
 (1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
-(только файл «Перрон») — дополнительно подкатегория и причина.
+(только файл «Перрон») — дополнительно подкатегория и причина; для
+таблицы 3 — подкатегория и заключение (файл «Перрон») плюс дата из файла
+GRH. Строки в детализирующих таблицах сортируются по дате от старых к
+новым.
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
@@ -17,6 +28,7 @@ from io import BytesIO
 import pandas as pd
 
 VIOLATIONS_SHEET = "ТАБЛИЦА"
+RPO_CHECKS_SHEET = "РПО"
 
 GRANULARITIES = {"week", "month", "quarter", "year"}
 
@@ -28,6 +40,11 @@ INSTALLATION_SUBCATEGORY = "Установка ВС на допустимые т
 REASON_KVS_BRAKING = "Несвоевременное торможение КВС"
 REASON_OUT_OF_VIEW = "Невозможно оценить (вне ракурса СОК)"
 REASON_AOOPO = "Вина АООПО"
+
+RPO_SUBCATEGORY = "Руководство подъездом /отъездом;"
+RPO_CONCLUSION = "с виной"
+
+NOT_UPLOADED = "Файл не загружен"
 
 
 def _find_column(columns: list[str], name: str) -> str | None:
@@ -52,6 +69,7 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     description_col = _find_column(columns, "описание")
     executor_col = _find_column(columns, "исполнитель")
     department_col = _find_column(columns, "подразделение")
+    conclusion_col = _find_column(columns, "заключение")
 
     rename = {date_col: "date", category_col: "category"}
     keep = [date_col, category_col]
@@ -61,6 +79,7 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
         (description_col, "description"),
         (executor_col, "executor"),
         (department_col, "department"),
+        (conclusion_col, "conclusion"),
     ):
         if col is not None:
             rename[col] = key
@@ -70,13 +89,26 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     result = result.dropna(subset=["date"])
     result["category"] = result["category"].astype(str).str.strip()
-    for key in ("subcategory", "reason", "description", "executor", "department"):
+    for key in ("subcategory", "reason", "description", "executor", "department", "conclusion"):
         if key not in result.columns:
             result[key] = None
         else:
             stripped = result[key].apply(lambda v: str(v).strip() if pd.notna(v) else None)
             result[key] = stripped.where(stripped != "", None)
     return result
+
+
+def read_rpo_checks_file(file_obj: BytesIO) -> pd.DataFrame:
+    df = pd.read_excel(file_obj, sheet_name=RPO_CHECKS_SHEET)
+    columns = list(df.columns)
+
+    date_col = _find_column(columns, "дата")
+    if date_col is None:
+        raise ValueError("В файле проверок РПО нет колонки «Дата»")
+
+    result = df[[date_col]].rename(columns={date_col: "date"})
+    result["date"] = pd.to_datetime(result["date"], errors="coerce")
+    return result.dropna(subset=["date"])
 
 
 def _period_end(cur: pd.Timestamp, granularity: str) -> pd.Timestamp:
@@ -198,7 +230,7 @@ def _detail_rows(df: pd.DataFrame) -> list[dict]:
             "Исполнитель": _str_or_blank(row["executor"]),
             "Подразделение": _str_or_blank(row["department"]),
         }
-        for _, row in df.iterrows()
+        for _, row in df.sort_values("date").iterrows()
     ]
 
 
@@ -217,45 +249,101 @@ def build_alcohol_detail(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestam
     return _detail_rows(in_period)
 
 
-def build_violations_tables(
-    df_perron: pd.DataFrame,
-    df_avk: pd.DataFrame,
+def build_checks_table(
+    df_grh: pd.DataFrame | None,
+    df_perron: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
 ) -> list[dict]:
-    combined = pd.concat([df_perron, df_avk], ignore_index=True)
+    buckets = generate_buckets(start, end, granularity)
 
-    alcohol_rows = build_category_count_table(combined, ALCOHOL_CATEGORY, start, end, granularity)
-    alcohol_detail_rows = build_alcohol_detail(combined, start, end)
-    installation_rows = build_installation_table(df_perron, start, end, granularity)
-    installation_aoopo_rows = build_installation_aoopo_detail(df_perron, start, end)
+    complaints = None
+    if df_perron is not None:
+        complaints = df_perron[
+            (df_perron["subcategory"] == RPO_SUBCATEGORY) & (df_perron["conclusion"] == RPO_CONCLUSION)
+        ]
 
+    rows = []
+    for bucket_start, bucket_end in buckets:
+        row = {"Период": _format_period(bucket_start, bucket_end, granularity)}
+        if df_grh is None:
+            row["Кол-во проверок"] = NOT_UPLOADED
+        else:
+            in_bucket = df_grh[(df_grh["date"] >= bucket_start) & (df_grh["date"] <= bucket_end)]
+            row["Кол-во проверок"] = int(len(in_bucket))
+        if complaints is None:
+            row["Кол-во замечаний"] = NOT_UPLOADED
+        else:
+            in_bucket = complaints[(complaints["date"] >= bucket_start) & (complaints["date"] <= bucket_end)]
+            row["Кол-во замечаний"] = int(len(in_bucket))
+        rows.append(row)
+    return rows
+
+
+def _not_uploaded_table(table_id: str, title: str, columns: list[str]) -> dict:
+    return {"id": table_id, "title": title, "columns": columns, "message": NOT_UPLOADED, "rows": []}
+
+
+def build_quality_tables(
+    df_perron: pd.DataFrame | None,
+    df_avk: pd.DataFrame | None,
+    df_grh: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    granularity: str,
+) -> list[dict]:
     detail_columns = ["Дата", "Описание", "Исполнитель", "Подразделение"]
+    available = [df for df in (df_perron, df_avk) if df is not None]
+    combined = pd.concat(available, ignore_index=True) if available else None
 
-    return [
-        {
+    if combined is not None:
+        alcohol_table = {
             "id": "alcohol",
             "title": "1. Алкогольное/наркотическое опьянение",
             "columns": ["Период", "Кол-во"],
-            "rows": alcohol_rows,
-        },
-        {
+            "rows": build_category_count_table(combined, ALCOHOL_CATEGORY, start, end, granularity),
+        }
+        alcohol_detail_table = {
             "id": "alcohol_detail",
             "title": "1.1. Алкогольное/наркотическое опьянение — детализация",
             "columns": detail_columns,
-            "rows": alcohol_detail_rows,
-        },
-        {
+            "rows": build_alcohol_detail(combined, start, end),
+        }
+    else:
+        alcohol_table = _not_uploaded_table("alcohol", "1. Алкогольное/наркотическое опьянение", ["Период", "Кол-во"])
+        alcohol_detail_table = _not_uploaded_table(
+            "alcohol_detail", "1.1. Алкогольное/наркотическое опьянение — детализация", detail_columns
+        )
+
+    if df_perron is not None:
+        installation_table = {
             "id": "installation",
             "title": "2. Установка ВС не по разметке",
             "columns": ["Период", REASON_KVS_BRAKING, REASON_OUT_OF_VIEW, REASON_AOOPO],
-            "rows": installation_rows,
-        },
-        {
+            "rows": build_installation_table(df_perron, start, end, granularity),
+        }
+        installation_detail_table = {
             "id": "installation_aoopo_detail",
             "title": "2.1. Вина АООПО — детализация",
             "columns": detail_columns,
-            "rows": installation_aoopo_rows,
-        },
-    ]
+            "rows": build_installation_aoopo_detail(df_perron, start, end),
+        }
+    else:
+        installation_table = _not_uploaded_table(
+            "installation",
+            "2. Установка ВС не по разметке",
+            ["Период", REASON_KVS_BRAKING, REASON_OUT_OF_VIEW, REASON_AOOPO],
+        )
+        installation_detail_table = _not_uploaded_table(
+            "installation_aoopo_detail", "2.1. Вина АООПО — детализация", detail_columns
+        )
+
+    checks_table = {
+        "id": "rpo_checks",
+        "title": "3. Мониторинг корректности процедур РПО",
+        "columns": ["Период", "Кол-во проверок", "Кол-во замечаний"],
+        "rows": build_checks_table(df_grh, df_perron, start, end, granularity),
+    }
+
+    return [alcohol_table, alcohol_detail_table, installation_table, installation_detail_table, checks_table]

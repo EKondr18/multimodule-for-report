@@ -18,6 +18,15 @@ export default function SummaryTable({ table }: Props) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  if (table.message) {
+    return (
+      <div style={{ marginBottom: 24 }}>
+        <h4 style={{ margin: 0, marginBottom: 8 }}>{table.title}</h4>
+        <div className="status-msg">{table.message}</div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>

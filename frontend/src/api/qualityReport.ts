@@ -7,25 +7,26 @@ export interface SummaryTable {
   title: string;
   columns: string[];
   rows: Record<string, string | number>[];
+  message?: string;
 }
 
-interface ViolationsResponse {
+interface SummaryResponse {
   tables: SummaryTable[];
 }
 
-export async function fetchViolationsSummary(
-  perronFile: File,
-  avkFile: File,
+export async function fetchQualitySummary(
+  files: { perron?: File | null; avk?: File | null; grh?: File | null },
   startDate: string,
   endDate: string,
   granularity: Granularity
-): Promise<ViolationsResponse> {
+): Promise<SummaryResponse> {
   const formData = new FormData();
-  formData.append("perron_file", perronFile);
-  formData.append("avk_file", avkFile);
+  if (files.perron) formData.append("perron_file", files.perron);
+  if (files.avk) formData.append("avk_file", files.avk);
+  if (files.grh) formData.append("grh_file", files.grh);
   formData.append("start_date", startDate);
   formData.append("end_date", endDate);
   formData.append("granularity", granularity);
-  const res = await fetch(apiUrl("/api/quality-report/violations"), { method: "POST", body: formData });
-  return parseErrorOrJson<ViolationsResponse>(res);
+  const res = await fetch(apiUrl("/api/quality-report/summary"), { method: "POST", body: formData });
+  return parseErrorOrJson<SummaryResponse>(res);
 }
