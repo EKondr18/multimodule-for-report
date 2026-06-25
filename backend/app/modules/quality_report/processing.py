@@ -73,8 +73,23 @@ def generate_buckets(
     return buckets
 
 
-def _format_period(start: pd.Timestamp, end: pd.Timestamp) -> str:
-    return f"{start.strftime('%d.%m.%y')}-{end.strftime('%d.%m.%y')}"
+MONTH_NAMES = [
+    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+]
+
+
+def _format_period(start: pd.Timestamp, end: pd.Timestamp, granularity: str) -> str:
+    if granularity == "week":
+        return f"{start.strftime('%d.%m.%Y')} - {end.strftime('%d.%m.%Y')}"
+    if granularity == "month":
+        return f"{MONTH_NAMES[start.month - 1]} {start.year}"
+    if granularity == "quarter":
+        quarter = (start.month - 1) // 3 + 1
+        return f"{quarter} квартал {start.year}"
+    if granularity == "year":
+        return str(start.year)
+    raise ValueError(f"Неизвестный временной срез: {granularity}")
 
 
 def build_category_count_table(
@@ -90,7 +105,7 @@ def build_category_count_table(
     rows = []
     for bucket_start, bucket_end in buckets:
         count = int(((in_period["date"] >= bucket_start) & (in_period["date"] <= bucket_end)).sum())
-        rows.append({"Период": _format_period(bucket_start, bucket_end), "Кол-во": count})
+        rows.append({"Период": _format_period(bucket_start, bucket_end, granularity), "Кол-во": count})
     return rows
 
 
