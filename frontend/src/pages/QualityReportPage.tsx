@@ -1,15 +1,17 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
+import SummaryTable from "../components/SummaryTable";
+import { Granularity, SummaryTable as SummaryTableData, fetchViolationsSummary } from "../api/qualityReport";
 
-type Section = "violations" | "checks";
-type ViolationsPeriod = "week" | "month" | "quarter" | "year";
+type Section = "violations" | "checks" | "monitoring";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "violations", label: "Нарушения" },
   { id: "checks", label: "Проверки" },
+  { id: "monitoring", label: "Мониторинг LIR/СЗВ" },
 ];
 
-const VIOLATIONS_PERIODS: { id: ViolationsPeriod; label: string }[] = [
+const GRANULARITIES: { id: Granularity; label: string }[] = [
   { id: "week", label: "Неделя" },
   { id: "month", label: "Месяц" },
   { id: "quarter", label: "Квартал" },
@@ -18,23 +20,76 @@ const VIOLATIONS_PERIODS: { id: ViolationsPeriod; label: string }[] = [
 
 export default function QualityReportPage() {
   const [section, setSection] = useState<Section>("violations");
-  const [violationsPeriod, setViolationsPeriod] = useState<ViolationsPeriod>("week");
-  const [file, setFile] = useState<File | null>(null);
+  const [granularity, setGranularity] = useState<Granularity>("week");
+
+  const [perronFile, setPerronFile] = useState<File | null>(null);
+  const [avkFile, setAvkFile] = useState<File | null>(null);
+  const [pabFile, setPabFile] = useState<File | null>(null);
+  const [grhFile, setGrhFile] = useState<File | null>(null);
+  const [lirFile, setLirFile] = useState<File | null>(null);
+
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+
+  const [violationsTables, setViolationsTables] = useState<SummaryTableData[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const changeGranularity = (next: Granularity) => {
+    setGranularity(next);
+    setViolationsTables([]);
+  };
+
+  const handleBuildViolations = async () => {
+    if (!perronFile || !avkFile || !startDate || !endDate) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchViolationsSummary(perronFile, avkFile, startDate, endDate, granularity);
+      setViolationsTables(result.tables);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div>
       <h1>Отчёт по качеству</h1>
 
       <div className="card">
-        <h3>1. Загрузить эксель-файл</h3>
-        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setFile} />
-        {file && <div className="status-msg">Выбран файл: {file.name}</div>}
+        <h3>1. Нарушения на перроне</h3>
+        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setPerronFile} />
+        {perronFile && <div className="status-msg">Выбран файл: {perronFile.name}</div>}
       </div>
 
       <div className="card">
-        <h3>2. Период</h3>
+        <h3>2. Нарушения в АВК</h3>
+        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setAvkFile} />
+        {avkFile && <div className="status-msg">Выбран файл: {avkFile.name}</div>}
+      </div>
+
+      <div className="card">
+        <h3>3. Проверки PAB</h3>
+        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setPabFile} />
+        {pabFile && <div className="status-msg">Выбран файл: {pabFile.name}</div>}
+      </div>
+
+      <div className="card">
+        <h3>4. Проверки GRH</h3>
+        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setGrhFile} />
+        {grhFile && <div className="status-msg">Выбран файл: {grhFile.name}</div>}
+      </div>
+
+      <div className="card">
+        <h3>5. Мониторинг LIR/СЗВ</h3>
+        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setLirFile} />
+        {lirFile && <div className="status-msg">Выбран файл: {lirFile.name}</div>}
+      </div>
+
+      <div className="card">
+        <h3>6. Период</h3>
         <div className="period-row">
           <label>
             С
@@ -65,19 +120,36 @@ export default function QualityReportPage() {
         <div className="card">
           <h3>Нарушения</h3>
           <div className="station-switch">
-            {VIOLATIONS_PERIODS.map((p) => (
+            {GRANULARITIES.map((g) => (
               <button
-                key={p.id}
-                className={violationsPeriod === p.id ? "btn active" : "btn"}
-                onClick={() => setViolationsPeriod(p.id)}
+                key={g.id}
+                className={granularity === g.id ? "btn active" : "btn"}
+                onClick={() => changeGranularity(g.id)}
               >
-                {p.label}
+                {g.label}
               </button>
             ))}
           </div>
-          <div className="status-msg" style={{ marginTop: 16 }}>
-            Логика расчёта раздела «Нарушения» в разработке.
+
+          <div style={{ marginTop: 16 }}>
+            <button
+              className="btn"
+              onClick={handleBuildViolations}
+              disabled={!perronFile || !avkFile || !startDate || !endDate || loading}
+            >
+              Сформировать
+            </button>
+            {loading && <div className="status-msg">Обработка файлов…</div>}
+            {error && <div className="status-msg error">{error}</div>}
           </div>
+
+          {violationsTables.length > 0 && (
+            <div style={{ marginTop: 24 }}>
+              {violationsTables.map((table) => (
+                <SummaryTable key={table.id} table={table} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -85,6 +157,13 @@ export default function QualityReportPage() {
         <div className="card">
           <h3>Проверки</h3>
           <div className="status-msg">Раздел «Проверки» в разработке.</div>
+        </div>
+      )}
+
+      {section === "monitoring" && (
+        <div className="card">
+          <h3>Мониторинг LIR/СЗВ</h3>
+          <div className="status-msg">Раздел «Мониторинг LIR/СЗВ» в разработке.</div>
         </div>
       )}
     </div>
