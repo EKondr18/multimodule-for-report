@@ -47,8 +47,11 @@ REASON_AOOPO = "Вина АООПО"
 
 RPO_SUBCATEGORY = "Руководство подъездом /отъездом;"
 
-FO_CATEGORY = "Нарушение ФО, этики"
-FO_SUBCATEGORIES = {"Нарушение ФО", "Нарушение элементов корпоративного стиля"}
+FO_SUBCATEGORIES = {
+    "Нарушение ФО",
+    "Нарушение элементов корпоративного стиля",
+    "Соблюдение СИЗ",
+}
 
 WITH_FAULT_CONCLUSION = "с виной"
 
@@ -283,8 +286,7 @@ def _rpo_complaints_filter(df_perron: pd.DataFrame) -> pd.DataFrame:
 
 def _fo_siz_complaints_filter(df_perron: pd.DataFrame) -> pd.DataFrame:
     return df_perron[
-        (df_perron["category"] == FO_CATEGORY)
-        & (df_perron["subcategory"].isin(FO_SUBCATEGORIES))
+        (df_perron["subcategory"].isin(FO_SUBCATEGORIES))
         & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
     ]
 
