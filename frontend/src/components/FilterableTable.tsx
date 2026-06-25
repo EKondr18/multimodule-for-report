@@ -9,9 +9,10 @@ interface Props {
   columns: Column[];
   rows: Record<string, string>[];
   pageSize?: number;
+  totals?: Record<string, string | number>;
 }
 
-export default function FilterableTable({ columns, rows, pageSize = 25 }: Props) {
+export default function FilterableTable({ columns, rows, pageSize = 25, totals }: Props) {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(0);
 
@@ -90,6 +91,17 @@ export default function FilterableTable({ columns, rows, pageSize = 25 }: Props)
             </tr>
           ))}
         </tbody>
+        {totals && (
+          <tfoot>
+            <tr className="totals">
+              {columns.map((col, idx) => (
+                <td key={col.key}>
+                  {idx === 0 ? "Итого" : (totals[col.key] ?? "")}
+                </td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
       </table>
       <div className="pagination">
         <button

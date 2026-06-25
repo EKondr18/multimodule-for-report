@@ -1,9 +1,15 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
 import FilterableTable from "../components/FilterableTable";
-import { CommentRow, Station, downloadXlsxBase64, processBaggageComments } from "../api/baggageComments";
+import {
+  CommentRow,
+  Station,
+  TbsCommentRow,
+  downloadXlsxBase64,
+  processBaggageComments,
+} from "../api/baggageComments";
 
-const COLUMNS = [
+const VKO_COLUMNS = [
   { key: "date", label: "Дата" },
   { key: "company", label: "Авиакомпания" },
   { key: "bag_status", label: "Статус выдачи" },
@@ -11,11 +17,19 @@ const COLUMNS = [
   { key: "comment", label: "Комментарий" },
 ];
 
+const TBS_COLUMNS = [
+  { key: "Дата рейса", label: "Дата рейса" },
+  { key: "Номер рейса", label: "Номер рейса" },
+  { key: "Багаж с повреждением", label: "Багаж с повреждением" },
+  { key: "Багаж с признаками доступа к содержимому", label: "Багаж с признаками доступа к содержимому" },
+];
+
 export default function BaggageCommentsPage() {
   const [station, setStation] = useState<Station>("vko");
   const [normFile, setNormFile] = useState<File | null>(null);
   const [eventsFile, setEventsFile] = useState<File | null>(null);
-  const [rows, setRows] = useState<CommentRow[]>([]);
+  const [rows, setRows] = useState<(CommentRow | TbsCommentRow)[]>([]);
+  const [totals, setTotals] = useState<Record<string, number> | undefined>(undefined);
   const [xlsxBase64, setXlsxBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +39,7 @@ export default function BaggageCommentsPage() {
     setNormFile(null);
     setEventsFile(null);
     setRows([]);
+    setTotals(undefined);
     setXlsxBase64(null);
     setError(null);
   };
@@ -34,15 +49,28 @@ export default function BaggageCommentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await processBaggageComments(normFile, eventsFile, station);
-      setRows(result.rows);
-      setXlsxBase64(result.xlsx_base64);
+      if (station === "tbs") {
+        const result = await processBaggageComments(normFile, eventsFile, "tbs");
+        setRows(result.rows);
+        setTotals(result.totals);
+        setXlsxBase64(result.xlsx_base64);
+      } else {
+        const result = await processBaggageComments(normFile, eventsFile, "vko");
+        setRows(result.rows);
+        setTotals(undefined);
+        setXlsxBase64(result.xlsx_base64);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   };
+
+  const columns = station === "tbs" ? TBS_COLUMNS : VKO_COLUMNS;
+  const window1Title = station === "tbs" ? "Рейсы из TBS (прилет)" : "Норматив выдачи багажа (csv)";
+  const window1Accept = station === "tbs" ? ".xlsx,.xls" : ".csv";
+  const window2Title = station === "tbs" ? "События по багажу" : "События по выдаче (excel)";
 
   return (
     <div>
@@ -66,10 +94,10 @@ export default function BaggageCommentsPage() {
       </div>
 
       <div className="card">
-        <h3>1. Норматив выдачи багажа (csv)</h3>
+        <h3>1. {window1Title}</h3>
         <FileUpload
-          accept=".csv"
-          label="Перетащите csv-файл сюда или нажмите, чтобы выбрать"
+          accept={window1Accept}
+          label="Перетащите файл сюда или нажмите, чтобы выбрать"
           onFile={setNormFile}
           disabled={loading}
         />
@@ -77,7 +105,7 @@ export default function BaggageCommentsPage() {
       </div>
 
       <div className="card">
-        <h3>2. События по выдаче (excel)</h3>
+        <h3>2. {window2Title}</h3>
         <FileUpload
           accept=".xlsx,.xls"
           label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать"
@@ -105,7 +133,11 @@ export default function BaggageCommentsPage() {
             Скачать excel
           </button>
           <div style={{ marginTop: 16 }}>
-            <FilterableTable columns={COLUMNS} rows={rows as unknown as Record<string, string>[]} />
+            <FilterableTable
+              columns={columns}
+              rows={rows as unknown as Record<string, string>[]}
+              totals={totals}
+            />
           </div>
         </div>
       )}
