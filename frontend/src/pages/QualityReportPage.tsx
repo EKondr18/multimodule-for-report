@@ -59,33 +59,33 @@ export default function QualityReportPage() {
       <h1>Отчёт по качеству</h1>
 
       <div className="card">
-        <h3>1. Нарушения на перроне</h3>
-        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setPerronFile} />
-        {perronFile && <div className="status-msg">Выбран файл: {perronFile.name}</div>}
-      </div>
-
-      <div className="card">
-        <h3>2. Нарушения в АВК</h3>
-        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setAvkFile} />
-        {avkFile && <div className="status-msg">Выбран файл: {avkFile.name}</div>}
-      </div>
-
-      <div className="card">
-        <h3>3. Проверки PAB</h3>
-        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setPabFile} />
-        {pabFile && <div className="status-msg">Выбран файл: {pabFile.name}</div>}
-      </div>
-
-      <div className="card">
-        <h3>4. Проверки GRH</h3>
-        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setGrhFile} />
-        {grhFile && <div className="status-msg">Выбран файл: {grhFile.name}</div>}
-      </div>
-
-      <div className="card">
-        <h3>5. Мониторинг LIR/СЗВ</h3>
-        <FileUpload accept=".xlsx,.xls" label="Перетащите xlsx-файл сюда или нажмите, чтобы выбрать" onFile={setLirFile} />
-        {lirFile && <div className="status-msg">Выбран файл: {lirFile.name}</div>}
+        <div className="upload-grid">
+          <div className="upload-item">
+            <h4>1. Нарушения на перроне</h4>
+            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setPerronFile} />
+            {perronFile && <div className="status-msg">{perronFile.name}</div>}
+          </div>
+          <div className="upload-item">
+            <h4>2. Нарушения в АВК</h4>
+            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setAvkFile} />
+            {avkFile && <div className="status-msg">{avkFile.name}</div>}
+          </div>
+          <div className="upload-item">
+            <h4>3. Проверки PAB</h4>
+            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setPabFile} />
+            {pabFile && <div className="status-msg">{pabFile.name}</div>}
+          </div>
+          <div className="upload-item">
+            <h4>4. Проверки GRH</h4>
+            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setGrhFile} />
+            {grhFile && <div className="status-msg">{grhFile.name}</div>}
+          </div>
+          <div className="upload-item">
+            <h4>5. Мониторинг LIR/СЗВ</h4>
+            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setLirFile} />
+            {lirFile && <div className="status-msg">{lirFile.name}</div>}
+          </div>
+        </div>
       </div>
 
       <div className="card">

@@ -5,6 +5,7 @@ interface Props {
   disabled?: boolean;
   accept?: string;
   label?: string;
+  compact?: boolean;
 }
 
 export default function FileUpload({
@@ -12,6 +13,7 @@ export default function FileUpload({
   disabled,
   accept = ".xlsx,.xls",
   label = "Перетащите xlsx-файл за неделю сюда или нажмите, чтобы выбрать",
+  compact = false,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -23,7 +25,7 @@ export default function FileUpload({
 
   return (
     <div
-      className={`dropzone${dragOver ? " dragover" : ""}`}
+      className={`dropzone${compact ? " dropzone-compact" : ""}${dragOver ? " dragover" : ""}`}
       onClick={() => !disabled && inputRef.current?.click()}
       onDragOver={(e) => {
         e.preventDefault();
