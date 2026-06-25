@@ -38,7 +38,7 @@ export default function QualityReportPage() {
     setError(null);
     try {
       const result = await fetchQualitySummary(
-        { perron: perronFile, avk: avkFile, grh: grhFile },
+        { perron: perronFile, avk: avkFile, grh: grhFile, lir: lirFile },
         startDate,
         endDate,
         granularity
@@ -103,7 +103,15 @@ export default function QualityReportPage() {
           </div>
           <div className="upload-item">
             <h4>5. Мониторинг LIR/СЗВ</h4>
-            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setLirFile} />
+            <FileUpload
+              compact
+              accept=".xlsx,.xls"
+              label="Перетащите файл или нажмите"
+              onFile={(f) => {
+                setLirFile(f);
+                invalidateCache();
+              }}
+            />
             {lirFile && <div className="status-msg">{lirFile.name}</div>}
           </div>
         </div>

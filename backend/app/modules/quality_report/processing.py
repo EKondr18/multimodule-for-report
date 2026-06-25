@@ -1,31 +1,45 @@
 """Обработка модуля «Отчёт по качеству» — единый набор таблиц без разделения
 на разделы Нарушения/Проверки/Мониторинг.
 
-На вход — до трёх независимо загружаемых excel-файлов: «Нарушения на
+На вход — до четырёх независимо загружаемых excel-файлов: «Нарушения на
 перроне», «Нарушения в АВК» (лист «ТАБЛИЦА» в каждом, с разным регистром
-колонки даты — «Дата»/«дата» — и разным набором остальных колонок) и
+колонки даты — «Дата»/«дата» — и разным набором остальных колонок),
 «Проверки GRH» (листы «РПО» и «ФО и СИЗ» — по одному на каждую из таблиц
-3 и 4). Каждая таблица строится из того, что загружено; если для неё не
-хватает нужного файла/листа — вместо данных выводится отметка
-`NOT_UPLOADED` ("Файл не загружен"), на уровне всей таблицы (1, 1.1, 2,
-2.1, 5) либо на уровне отдельных ячеек, если в одной таблице разные
-колонки зависят от разных файлов (3, 4).
+3 и 4) и «Мониторинг LIR/СЗВ» (колонки «Дата», «ФИО Агента», «Описание
+причины замечания» — для таблиц 6, 6.1, 6.2). Каждая таблица строится из
+того, что загружено; если для неё не хватает нужного файла/листа — вместо
+данных выводится отметка `NOT_UPLOADED` ("Файл не загружен"), на уровне
+всей таблицы (1, 1.1, 2, 2.1, 5, 6, 6.1, 6.2) либо на уровне отдельных
+ячеек, если в одной таблице разные колонки зависят от разных файлов (3, 4).
 
 Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
 (1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
 (только файл «Перрон») — дополнительно подкатегория и причина; для таблиц
 3 и 4 — подкатегория и заключение (файл «Перрон») плюс дата из
 соответствующего листа файла GRH; для таблицы 5 (только файл «Перрон») —
-описание, место, бортовой номер, исполнитель и подразделение. Строки в
-детализирующих и списочных таблицах (1.1, 2.1, 5) сортируются по дате от
-старых к новым.
+описание, место, бортовой номер, исполнитель и подразделение; для таблиц
+6, 6.1, 6.2 (только файл «Мониторинг LIR/СЗВ») — дата, ФИО агента и
+описание причины замечания (строка считается замечанием, если в этой
+колонке не написано «без замечаний»). Строки в детализирующих и списочных
+таблицах (1.1, 2.1, 5) сортируются по дате от старых к новым.
+
+ФИО агентов в файле LIR/СЗВ могут заноситься с разным количеством пробелов,
+регистром или опечатками — перед подсчётом по сотруднику такие варианты
+схлопываются в одно каноническое имя (см. `_canonicalize_agent_names`):
+сначала группировка по «очищенному» от лишних пробелов и регистра
+варианту, затем — слияние похожих вариантов (опечатки) по строковому
+сходству (`difflib`).
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
 границам периода — например, период 08.06.2026-21.06.2026 со срезом
-«неделя» даёт два интервала: 08.06-14.06 и 15.06-21.06.
+«неделя» даёт два интервала: 08.06-14.06 и 15.06-21.06. Таблица 6.1 считает
+нарушения по сотрудникам в пределах выбранного периода (без разбивки по
+срезу); таблица 6.2 — топ-10 сотрудников по нарушениям за всю историю
+загруженного файла, независимо от выбранного периода.
 """
 
+import difflib
 from io import BytesIO
 
 import pandas as pd
@@ -56,6 +70,9 @@ FO_SUBCATEGORIES = {
 WITH_FAULT_CONCLUSION = "с виной"
 
 SAFETY_CATEGORY = "Техника безопасности, охраны труда"
+
+NO_VIOLATIONS_TEXT = "без замечаний"
+AGENT_NAME_SIMILARITY_THRESHOLD = 0.9
 
 NOT_UPLOADED = "Файл не загружен"
 
@@ -138,6 +155,121 @@ def read_grh_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | 
     result = df[[date_col]].rename(columns={date_col: "date"})
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     return result.dropna(subset=["date"])
+
+
+def _find_column_contains(columns: list[str], substr: str) -> str | None:
+    substr = substr.strip().lower()
+    for col in columns:
+        if substr in str(col).strip().lower():
+            return col
+    return None
+
+
+def _clean_agent_name(raw) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    cleaned = " ".join(raw.split())
+    return cleaned or None
+
+
+def _canonicalize_agent_names(names: pd.Series) -> dict[str, str]:
+    """Map each distinct cleaned name to a canonical display name, merging
+    variants that differ only by case or by a small number of typos."""
+    counts = names.value_counts()
+    fold_groups: dict[str, list[str]] = {}
+    for name in counts.index:
+        fold_groups.setdefault(name.casefold(), []).append(name)
+
+    fold_keys = list(fold_groups.keys())
+    clusters: list[list[str]] = []
+    for key in fold_keys:
+        match = next(
+            (
+                cluster
+                for cluster in clusters
+                if any(
+                    difflib.SequenceMatcher(None, key, existing).ratio() >= AGENT_NAME_SIMILARITY_THRESHOLD
+                    for existing in cluster
+                )
+            ),
+            None,
+        )
+        if match is None:
+            clusters.append([key])
+        else:
+            match.append(key)
+
+    mapping: dict[str, str] = {}
+    for cluster in clusters:
+        candidates = [name for fold_key in cluster for name in fold_groups[fold_key]]
+        canonical = max(candidates, key=lambda n: counts[n])
+        for fold_key in cluster:
+            for name in fold_groups[fold_key]:
+                mapping[name] = canonical
+    return mapping
+
+
+def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
+    df = pd.read_excel(file_obj)
+    columns = list(df.columns)
+
+    date_col = _find_column(columns, "дата") or _find_column_contains(columns, "дата")
+    agent_col = _find_column_contains(columns, "фио")
+    reason_col = _find_column_contains(columns, "причин")
+    if date_col is None or agent_col is None or reason_col is None:
+        raise ValueError(
+            "В файле «Мониторинг LIR/СЗВ» нет колонок «Дата», «ФИО Агента» "
+            "и/или «Описание причины замечания»"
+        )
+
+    result = df[[date_col, agent_col, reason_col]].rename(
+        columns={date_col: "date", agent_col: "agent_raw", reason_col: "reason_description"}
+    )
+    result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
+    result = result.dropna(subset=["date"])
+
+    result["agent_raw"] = result["agent_raw"].apply(_clean_agent_name)
+    result = result.dropna(subset=["agent_raw"])
+
+    canonical_map = _canonicalize_agent_names(result["agent_raw"])
+    result["agent"] = result["agent_raw"].map(canonical_map)
+
+    result["reason_description"] = result["reason_description"].apply(
+        lambda v: str(v).strip() if pd.notna(v) else ""
+    )
+    result["has_violation"] = result["reason_description"].str.casefold() != NO_VIOLATIONS_TEXT.casefold()
+    return result.drop(columns=["agent_raw"])
+
+
+def build_lir_szv_table(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, granularity: str
+) -> list[dict]:
+    in_period = df[(df["date"] >= start) & (df["date"] <= end)]
+    buckets = generate_buckets(start, end, granularity)
+
+    rows = []
+    for bucket_start, bucket_end in buckets:
+        bucket_data = in_period[(in_period["date"] >= bucket_start) & (in_period["date"] <= bucket_end)]
+        rows.append(
+            {
+                "Период": _format_period(bucket_start, bucket_end, granularity),
+                "Кол-во проверок": int(len(bucket_data)),
+                "Кол-во замечаний": int(bucket_data["has_violation"].sum()),
+            }
+        )
+    return rows
+
+
+def build_lir_szv_employee_detail(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> list[dict]:
+    in_period = df[(df["date"] >= start) & (df["date"] <= end) & df["has_violation"]]
+    counts = in_period.groupby("agent").size().sort_values(ascending=False)
+    return [{"ФИО Агента": agent, "Кол-во нарушений": int(count)} for agent, count in counts.items()]
+
+
+def build_lir_szv_top_employees(df: pd.DataFrame, top_n: int = 10) -> list[dict]:
+    violations = df[df["has_violation"]]
+    counts = violations.groupby("agent").size().sort_values(ascending=False).head(top_n)
+    return [{"ФИО Агента": agent, "Кол-во нарушений": int(count)} for agent, count in counts.items()]
 
 
 def _period_end(cur: pd.Timestamp, granularity: str) -> pd.Timestamp:
@@ -358,6 +490,7 @@ def build_quality_tables(
     df_avk: pd.DataFrame | None,
     df_grh_rpo: pd.DataFrame | None,
     df_grh_fo_siz: pd.DataFrame | None,
+    df_lir: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
@@ -437,6 +570,36 @@ def build_quality_tables(
             "safety_violations", "5. Нарушения техники безопасности и охраны труда", safety_columns
         )
 
+    lir_columns = ["Период", "Кол-во проверок", "Кол-во замечаний"]
+    employee_columns = ["ФИО Агента", "Кол-во нарушений"]
+    if df_lir is not None:
+        lir_table = {
+            "id": "lir_szv",
+            "title": "6. Мониторинг LIR/СЗВ",
+            "columns": lir_columns,
+            "rows": build_lir_szv_table(df_lir, start, end, granularity),
+        }
+        lir_employee_detail_table = {
+            "id": "lir_szv_employee_detail",
+            "title": "6.1. Нарушения по сотрудникам за период",
+            "columns": employee_columns,
+            "rows": build_lir_szv_employee_detail(df_lir, start, end),
+        }
+        lir_top_employees_table = {
+            "id": "lir_szv_top_employees",
+            "title": "6.2. Топ-10 сотрудников по нарушениям за всю историю",
+            "columns": employee_columns,
+            "rows": build_lir_szv_top_employees(df_lir),
+        }
+    else:
+        lir_table = _not_uploaded_table("lir_szv", "6. Мониторинг LIR/СЗВ", lir_columns)
+        lir_employee_detail_table = _not_uploaded_table(
+            "lir_szv_employee_detail", "6.1. Нарушения по сотрудникам за период", employee_columns
+        )
+        lir_top_employees_table = _not_uploaded_table(
+            "lir_szv_top_employees", "6.2. Топ-10 сотрудников по нарушениям за всю историю", employee_columns
+        )
+
     return [
         alcohol_table,
         alcohol_detail_table,
@@ -445,4 +608,7 @@ def build_quality_tables(
         rpo_table,
         fo_siz_table,
         safety_table,
+        lir_table,
+        lir_employee_detail_table,
+        lir_top_employees_table,
     ]
