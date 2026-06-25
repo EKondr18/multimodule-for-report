@@ -2,8 +2,9 @@
 
 На вход — выгрузки нарушений по перрону и АВК (лист «ТАБЛИЦА» в каждом
 файле, с разным регистром колонки даты — «Дата»/«дата» — и разным набором
-остальных колонок). Для текущих сводных таблиц нужны только дата и
-категория нарушения.
+остальных колонок). Для таблицы 1 нужны только дата и категория нарушения;
+для таблицы 2 (только файл «Перрон») — также подкатегория, причина,
+описание и исполнитель.
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
@@ -21,6 +22,13 @@ GRANULARITIES = {"week", "month", "quarter", "year"}
 
 ALCOHOL_CATEGORY = "Алкогольное и наркотическое опъянение"
 
+INSTALLATION_CATEGORY = "Встреча ВС на МС"
+INSTALLATION_SUBCATEGORY = "Установка ВС на допустимые точки"
+
+REASON_KVS_BRAKING = "Несвоевременное торможение КВС"
+REASON_OUT_OF_VIEW = "Невозможно оценить (вне ракурса СОК)"
+REASON_AOOPO = "Вина АООПО"
+
 
 def _find_column(columns: list[str], name: str) -> str | None:
     name = name.strip().lower()
@@ -32,16 +40,40 @@ def _find_column(columns: list[str], name: str) -> str | None:
 
 def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     df = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
+    columns = list(df.columns)
 
-    date_col = _find_column(list(df.columns), "дата")
-    category_col = _find_column(list(df.columns), "категория")
+    date_col = _find_column(columns, "дата")
+    category_col = _find_column(columns, "категория")
     if date_col is None or category_col is None:
         raise ValueError("В файле нарушений нет колонок «Дата» и/или «Категория»")
 
-    result = df[[date_col, category_col]].rename(columns={date_col: "date", category_col: "category"})
+    subcategory_col = _find_column(columns, "подкатегория")
+    reason_col = _find_column(columns, "причина")
+    description_col = _find_column(columns, "описание")
+    executor_col = _find_column(columns, "исполнитель")
+
+    rename = {date_col: "date", category_col: "category"}
+    keep = [date_col, category_col]
+    for col, key in (
+        (subcategory_col, "subcategory"),
+        (reason_col, "reason"),
+        (description_col, "description"),
+        (executor_col, "executor"),
+    ):
+        if col is not None:
+            rename[col] = key
+            keep.append(col)
+
+    result = df[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce")
     result = result.dropna(subset=["date"])
     result["category"] = result["category"].astype(str).str.strip()
+    for key in ("subcategory", "reason", "description", "executor"):
+        if key not in result.columns:
+            result[key] = None
+        else:
+            stripped = result[key].apply(lambda v: str(v).strip() if pd.notna(v) else None)
+            result[key] = stripped.where(stripped != "", None)
     return result
 
 
@@ -109,6 +141,63 @@ def build_category_count_table(
     return rows
 
 
+def _classify_reason(reason: str | None) -> str | None:
+    if reason is None or (not isinstance(reason, str) and pd.isna(reason)):
+        return None
+    text = str(reason).lower()
+    if "несвоевременное торможение" in text:
+        return REASON_KVS_BRAKING
+    if "вне ракурса" in text or "сок" in text:
+        return REASON_OUT_OF_VIEW
+    return REASON_AOOPO
+
+
+def _installation_subset(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    in_period = df[
+        (df["date"] >= start)
+        & (df["date"] <= end)
+        & (df["category"] == INSTALLATION_CATEGORY)
+        & (df["subcategory"] == INSTALLATION_SUBCATEGORY)
+    ].copy()
+    in_period["reason_bucket"] = in_period["reason"].apply(_classify_reason)
+    return in_period[in_period["reason_bucket"].notna()]
+
+
+def build_installation_table(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, granularity: str
+) -> list[dict]:
+    in_period = _installation_subset(df, start, end)
+    buckets = generate_buckets(start, end, granularity)
+
+    rows = []
+    for bucket_start, bucket_end in buckets:
+        bucket_data = in_period[(in_period["date"] >= bucket_start) & (in_period["date"] <= bucket_end)]
+        counts = bucket_data["reason_bucket"].value_counts()
+        rows.append(
+            {
+                "Период": _format_period(bucket_start, bucket_end, granularity),
+                REASON_KVS_BRAKING: int(counts.get(REASON_KVS_BRAKING, 0)),
+                REASON_OUT_OF_VIEW: int(counts.get(REASON_OUT_OF_VIEW, 0)),
+                REASON_AOOPO: int(counts.get(REASON_AOOPO, 0)),
+            }
+        )
+    return rows
+
+
+def build_installation_aoopo_detail(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+) -> list[dict]:
+    in_period = _installation_subset(df, start, end)
+    aoopo = in_period[in_period["reason_bucket"] == REASON_AOOPO]
+    return [
+        {
+            "Описание": row["description"] if isinstance(row["description"], str) else "",
+            "Исполнитель": row["executor"] if isinstance(row["executor"], str) else "",
+        }
+        for _, row in aoopo.iterrows()
+    ]
+
+
 def build_violations_tables(
     df_perron: pd.DataFrame,
     df_avk: pd.DataFrame,
@@ -119,6 +208,8 @@ def build_violations_tables(
     combined = pd.concat([df_perron, df_avk], ignore_index=True)
 
     alcohol_rows = build_category_count_table(combined, ALCOHOL_CATEGORY, start, end, granularity)
+    installation_rows = build_installation_table(df_perron, start, end, granularity)
+    installation_aoopo_rows = build_installation_aoopo_detail(df_perron, start, end)
 
     return [
         {
@@ -126,5 +217,17 @@ def build_violations_tables(
             "title": "1. Алкогольное/наркотическое опьянение",
             "columns": ["Период", "Кол-во"],
             "rows": alcohol_rows,
+        },
+        {
+            "id": "installation",
+            "title": "2. Установка ВС не по разметке",
+            "columns": ["Период", REASON_KVS_BRAKING, REASON_OUT_OF_VIEW, REASON_AOOPO],
+            "rows": installation_rows,
+        },
+        {
+            "id": "installation_aoopo_detail",
+            "title": "2.1. Вина АООПО — детализация",
+            "columns": ["Описание", "Исполнитель"],
+            "rows": installation_aoopo_rows,
         },
     ]
