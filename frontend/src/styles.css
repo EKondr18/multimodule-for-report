@@ -85,6 +85,20 @@ body {
   gap: 8px;
 }
 
+.period-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.period-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
 .station-switch .btn {
   background: #e5e7eb;
   color: #1f2937;

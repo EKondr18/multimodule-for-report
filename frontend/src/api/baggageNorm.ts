@@ -26,6 +26,10 @@ export async function uploadWeeklyFile(file: File): Promise<ProcessResponse> {
   return parseErrorOrJson<ProcessResponse>(res);
 }
 
-export function downloadDatalensCsv() {
-  window.location.href = apiUrl("/api/baggage-norm/download");
+export function downloadDatalensCsv(startDate?: string, endDate?: string) {
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const query = params.toString();
+  window.location.href = apiUrl(`/api/baggage-norm/download${query ? `?${query}` : ""}`);
 }

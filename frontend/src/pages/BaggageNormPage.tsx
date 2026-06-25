@@ -15,6 +15,8 @@ export default function BaggageNormPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   useEffect(() => {
     fetchCurrent()
@@ -51,9 +53,31 @@ export default function BaggageNormPage() {
 
       <div className="card">
         <h3>2. Итоговый файл для DataLens</h3>
-        <button className="btn" onClick={downloadDatalensCsv} disabled={rows.length === 0}>
-          Скачать csv
+        <button className="btn" onClick={() => downloadDatalensCsv()} disabled={rows.length === 0}>
+          Скачать csv (весь архив)
         </button>
+
+        <div style={{ marginTop: 16 }}>
+          <h4 style={{ margin: "0 0 8px" }}>Скачать csv за период (опционально)</h4>
+          <div className="period-row">
+            <label>
+              С
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </label>
+            <label>
+              По
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </label>
+            <button
+              className="btn"
+              onClick={() => downloadDatalensCsv(startDate || undefined, endDate || undefined)}
+              disabled={rows.length === 0 || (!startDate && !endDate)}
+            >
+              Скачать csv за период
+            </button>
+          </div>
+        </div>
+
         <div style={{ marginTop: 16 }}>
           <FilterableTable columns={COLUMNS} rows={rows as unknown as Record<string, string>[]} />
         </div>

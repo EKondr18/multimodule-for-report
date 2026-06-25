@@ -88,15 +88,36 @@ async def process_weekly_file(file: UploadFile):
 
 
 @router.get("/download")
-def download_datalens_csv():
+def download_datalens_csv(start_date: str | None = None, end_date: str | None = None):
     content, _ = github_storage.read_file(DATALENS_PATH)
     if content is None:
         df_master, _ = _load_master()
-        content = derive_datalens(df_master).to_csv(index=False)
+        datalens = derive_datalens(df_master)
+    else:
+        datalens = pd.read_csv(StringIO(content))
+
+    if start_date or end_date:
+        try:
+            parsed_start = pd.to_datetime(start_date) if start_date else None
+            parsed_end = pd.to_datetime(end_date) if end_date else None
+        except ValueError as exc:
+            raise HTTPException(400, f"Некорректная дата: {exc}") from exc
+        if parsed_start is not None and parsed_end is not None and parsed_start > parsed_end:
+            raise HTTPException(400, "Дата начала периода позже даты окончания")
+
+        dates = pd.to_datetime(datalens["date"])
+        mask = pd.Series(True, index=datalens.index)
+        if parsed_start is not None:
+            mask &= dates >= parsed_start
+        if parsed_end is not None:
+            mask &= dates <= parsed_end
+        datalens = datalens[mask]
+        filename = f"bagazh_dlya_datalens_{start_date or 'nachalo'}_{end_date or 'konec'}.csv"
+    else:
+        filename = "bagazh_dlya_datalens.csv"
+
     return StreamingResponse(
-        iter([content]),
+        iter([datalens.to_csv(index=False)]),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": 'attachment; filename="bagazh_dlya_datalens.csv"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
