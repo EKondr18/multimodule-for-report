@@ -37,9 +37,10 @@
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
 границам периода — например, период 08.06.2026-21.06.2026 со срезом
-«неделя» даёт два интервала: 08.06-14.06 и 15.06-21.06. Таблица 6.1 считает
-нарушения по сотрудникам в пределах выбранного периода (без разбивки по
-срезу); таблица 6.2 — топ-10 сотрудников по нарушениям за всю историю
+«неделя» даёт два интервала: 08.06-14.06 и 15.06-21.06. Таблица 6.1 — по
+строке на сотрудника, по колонке на тот же набор срезов, что и в таблице 6
+(внутри выбранного периода), со значением — кол-во нарушений сотрудника в
+этом срезе; таблица 6.2 — топ-10 сотрудников по нарушениям за всю историю
 загруженного файла, независимо от выбранного периода.
 """
 
@@ -268,10 +269,26 @@ def build_lir_szv_table(
     return rows
 
 
-def build_lir_szv_employee_detail(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> list[dict]:
+def lir_szv_period_labels(start: pd.Timestamp, end: pd.Timestamp, granularity: str) -> list[str]:
+    return [_format_period(bucket_start, bucket_end, granularity) for bucket_start, bucket_end in generate_buckets(start, end, granularity)]
+
+
+def build_lir_szv_employee_detail(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, granularity: str
+) -> list[dict]:
     in_period = df[(df["date"] >= start) & (df["date"] <= end) & df["has_violation"]]
-    counts = in_period.groupby("agent").size().sort_values(ascending=False)
-    return [{"ФИО Агента": agent, "Кол-во нарушений": int(count)} for agent, count in counts.items()]
+    buckets = generate_buckets(start, end, granularity)
+    totals = in_period.groupby("agent").size().sort_values(ascending=False)
+
+    rows = []
+    for agent in totals.index:
+        agent_data = in_period[in_period["agent"] == agent]
+        row = {"ФИО Агента": agent}
+        for bucket_start, bucket_end in buckets:
+            label = _format_period(bucket_start, bucket_end, granularity)
+            row[label] = int(((agent_data["date"] >= bucket_start) & (agent_data["date"] <= bucket_end)).sum())
+        rows.append(row)
+    return rows
 
 
 def build_lir_szv_top_employees(df: pd.DataFrame, top_n: int = 10) -> list[dict]:
@@ -579,7 +596,8 @@ def build_quality_tables(
         )
 
     lir_columns = ["Период", "Кол-во проверок", "Кол-во замечаний"]
-    employee_columns = ["ФИО Агента", "Кол-во нарушений"]
+    employee_total_columns = ["ФИО Агента", "Кол-во нарушений"]
+    employee_period_columns = ["ФИО Агента"] + lir_szv_period_labels(start, end, granularity)
     if df_lir is not None:
         lir_table = {
             "id": "lir_szv",
@@ -589,23 +607,23 @@ def build_quality_tables(
         }
         lir_employee_detail_table = {
             "id": "lir_szv_employee_detail",
-            "title": "6.1. Нарушения по сотрудникам за период",
-            "columns": employee_columns,
-            "rows": build_lir_szv_employee_detail(df_lir, start, end),
+            "title": "6.1. Нарушения по сотрудникам по периодам",
+            "columns": employee_period_columns,
+            "rows": build_lir_szv_employee_detail(df_lir, start, end, granularity),
         }
         lir_top_employees_table = {
             "id": "lir_szv_top_employees",
             "title": "6.2. Топ-10 сотрудников по нарушениям за всю историю",
-            "columns": employee_columns,
+            "columns": employee_total_columns,
             "rows": build_lir_szv_top_employees(df_lir),
         }
     else:
         lir_table = _not_uploaded_table("lir_szv", "6. Мониторинг LIR/СЗВ", lir_columns)
         lir_employee_detail_table = _not_uploaded_table(
-            "lir_szv_employee_detail", "6.1. Нарушения по сотрудникам за период", employee_columns
+            "lir_szv_employee_detail", "6.1. Нарушения по сотрудникам по периодам", employee_period_columns
         )
         lir_top_employees_table = _not_uploaded_table(
-            "lir_szv_top_employees", "6.2. Топ-10 сотрудников по нарушениям за всю историю", employee_columns
+            "lir_szv_top_employees", "6.2. Топ-10 сотрудников по нарушениям за всю историю", employee_total_columns
         )
 
     return [
