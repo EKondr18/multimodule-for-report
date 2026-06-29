@@ -1,16 +1,19 @@
 """Обработка модуля «Отчёт по качеству» — единый набор таблиц без разделения
 на разделы Нарушения/Проверки/Мониторинг.
 
-На вход — до четырёх независимо загружаемых excel-файлов: «Нарушения на
+На вход — до шести независимо загружаемых excel-файлов: «Нарушения на
 перроне», «Нарушения в АВК» (лист «ТАБЛИЦА» в каждом, с разным регистром
 колонки даты — «Дата»/«дата» — и разным набором остальных колонок),
 «Проверки GRH» (листы «РПО» и «ФО и СИЗ» — по одному на каждую из таблиц
-3 и 4) и «Мониторинг LIR/СЗВ» (лист «LIR СЗВ 2026», колонки «Дата», «ФИО
-Агента», «Описание причины замечания» — для таблиц 6, 6.1, 6.2). Каждая таблица строится из
-того, что загружено; если для неё не хватает нужного файла/листа — вместо
-данных выводится отметка `NOT_UPLOADED` ("Файл не загружен"), на уровне
-всей таблицы (1, 1.1, 2, 2.1, 5, 6, 6.1, 6.2) либо на уровне отдельных
-ячеек, если в одной таблице разные колонки зависят от разных файлов (3, 4).
+3 и 4), «Мониторинг LIR/СЗВ» (лист «LIR СЗВ 2026», колонки «Дата», «ФИО
+Агента», «Описание причины замечания» — для таблиц 6, 6.1, 6.2) и
+«Проверки PAB» (лист «Нарушение ФО, этики», колонки «Дата», «№ стойки» —
+для таблицы 7, вместе с «Нарушения в АВК» для таблиц 7 и 7.2). Каждая
+таблица строится из того, что загружено; если для неё не хватает нужного
+файла/листа — вместо данных выводится отметка `NOT_UPLOADED` ("Файл не
+загружен"), на уровне всей таблицы (1, 1.1, 2, 2.1, 5, 6, 6.1, 6.2, 7.2)
+либо на уровне отдельных ячеек, если в одной таблице разные колонки
+зависят от разных файлов (3, 4, 7).
 
 Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
 (1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
@@ -20,8 +23,20 @@
 описание, место, бортовой номер, исполнитель и подразделение; для таблиц
 6, 6.1, 6.2 (только файл «Мониторинг LIR/СЗВ») — дата, ФИО агента и
 описание причины замечания (строка считается замечанием, если в этой
-колонке не написано «без замечаний»). Строки в детализирующих и списочных
-таблицах (1.1, 2.1, 5) сортируются по дате от старых к новым.
+колонке не написано «без замечаний»); для таблицы 7 — дата и № стойки из
+листа «Нарушение ФО, этики» файла «Проверки PAB» (кол-во проверок,
+кол-во уникальных стоек) плюс категория и заключение из файла
+«Нарушения в АВК» (кол-во нарушений: категория = «Нарушение ФО, этики» и
+заключение = «с виной» либо пусто/не заполнено); для таблицы 7.2 —
+подкатегория, заключение и описание из того же файла «Нарушения в АВК»
+(по строке на уникальную подкатегорию в категории «Нарушение ФО, этики»;
+«Кол-во случаев» — с тем же условием на заключение, что и в таблице 7;
+«Типовые нарушения» — уникальные описания через «; », где варианты,
+отличающиеся только пробелами/пунктуацией/опечатками, схлопываются в один
+текст, см. `_canonicalize_descriptions`). У таблицы 7 пятая колонка —
+всегда пустая (без заголовка и без данных), оставлена для ручных заметок.
+Строки в детализирующих и списочных таблицах (1.1, 2.1, 5) сортируются по
+дате от старых к новым.
 
 ФИО агентов в файле LIR/СЗВ могут заноситься с разным количеством пробелов,
 регистром или опечатками — перед подсчётом по сотруднику такие варианты
@@ -45,6 +60,7 @@
 """
 
 import difflib
+import re
 from io import BytesIO
 
 import pandas as pd
@@ -79,6 +95,10 @@ SAFETY_CATEGORY = "Техника безопасности, охраны тру�
 
 NO_VIOLATIONS_TEXT = "без замечаний"
 AGENT_NAME_SIMILARITY_THRESHOLD = 0.9
+DESCRIPTION_SIMILARITY_THRESHOLD = 0.85
+
+FO_ETHICS_CATEGORY = "Нарушение ФО, этики"
+PAB_FO_ETHICS_SHEET = "Нарушение ФО, этики"
 
 NOT_UPLOADED = "Файл не загружен"
 
@@ -163,6 +183,25 @@ def read_grh_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | 
     return result.dropna(subset=["date"])
 
 
+def read_pab_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | None:
+    xl = pd.ExcelFile(file_obj)
+    if sheet_name not in xl.sheet_names:
+        return None
+
+    df = xl.parse(sheet_name)
+    columns = list(df.columns)
+    date_col = _find_column(columns, "дата")
+    stand_col = _find_column(columns, "№ стойки")
+    if date_col is None or stand_col is None:
+        raise ValueError(f"На листе «{sheet_name}» файла «Проверки PAB» нет колонок «Дата» и/или «№ стойки»")
+
+    result = df[[date_col, stand_col]].rename(columns={date_col: "date", stand_col: "stand"})
+    result["date"] = pd.to_datetime(result["date"], errors="coerce")
+    result = result.dropna(subset=["date"])
+    result["stand"] = result["stand"].apply(lambda v: str(v).strip() if pd.notna(v) else None)
+    return result
+
+
 def _find_column_contains(columns: list[str], substr: str) -> str | None:
     substr = substr.strip().lower()
     for col in columns:
@@ -178,13 +217,14 @@ def _clean_agent_name(raw) -> str | None:
     return cleaned or None
 
 
-def _canonicalize_agent_names(names: pd.Series) -> dict[str, str]:
-    """Map each distinct cleaned name to a canonical display name, merging
-    variants that differ only by case or by a small number of typos."""
-    counts = names.value_counts()
+def _canonicalize_values(values: pd.Series, normalize, threshold: float) -> dict[str, str]:
+    """Map each distinct value to a canonical display value, merging variants
+    that normalize to the same key, or that are close enough (by string
+    similarity of their normalized form) to be considered typos of each other."""
+    counts = values.value_counts()
     fold_groups: dict[str, list[str]] = {}
-    for name in counts.index:
-        fold_groups.setdefault(name.casefold(), []).append(name)
+    for value in counts.index:
+        fold_groups.setdefault(normalize(value), []).append(value)
 
     fold_keys = list(fold_groups.keys())
     clusters: list[list[str]] = []
@@ -194,8 +234,7 @@ def _canonicalize_agent_names(names: pd.Series) -> dict[str, str]:
                 cluster
                 for cluster in clusters
                 if any(
-                    difflib.SequenceMatcher(None, key, existing).ratio() >= AGENT_NAME_SIMILARITY_THRESHOLD
-                    for existing in cluster
+                    difflib.SequenceMatcher(None, key, existing).ratio() >= threshold for existing in cluster
                 )
             ),
             None,
@@ -207,12 +246,30 @@ def _canonicalize_agent_names(names: pd.Series) -> dict[str, str]:
 
     mapping: dict[str, str] = {}
     for cluster in clusters:
-        candidates = [name for fold_key in cluster for name in fold_groups[fold_key]]
-        canonical = max(candidates, key=lambda n: counts[n])
+        candidates = [value for fold_key in cluster for value in fold_groups[fold_key]]
+        canonical = max(candidates, key=lambda v: counts[v])
         for fold_key in cluster:
-            for name in fold_groups[fold_key]:
-                mapping[name] = canonical
+            for value in fold_groups[fold_key]:
+                mapping[value] = canonical
     return mapping
+
+
+def _canonicalize_agent_names(names: pd.Series) -> dict[str, str]:
+    return _canonicalize_values(names, normalize=lambda n: n.casefold(), threshold=AGENT_NAME_SIMILARITY_THRESHOLD)
+
+
+_PUNCTUATION_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
+
+def _normalize_description_key(text: str) -> str:
+    no_punctuation = _PUNCTUATION_RE.sub("", text)
+    return " ".join(no_punctuation.split()).casefold()
+
+
+def _canonicalize_descriptions(descriptions: pd.Series) -> dict[str, str]:
+    return _canonicalize_values(
+        descriptions, normalize=_normalize_description_key, threshold=DESCRIPTION_SIMILARITY_THRESHOLD
+    )
 
 
 def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
@@ -519,6 +576,70 @@ def build_safety_violations_table(
     ]
 
 
+def _fo_ethics_violations_filter(df_avk: pd.DataFrame) -> pd.DataFrame:
+    conclusion = df_avk["conclusion"]
+    no_fault_recorded = conclusion.isna()
+    return df_avk[(df_avk["category"] == FO_ETHICS_CATEGORY) & ((conclusion == WITH_FAULT_CONCLUSION) | no_fault_recorded)]
+
+
+def build_fo_ethics_table(
+    df_avk: pd.DataFrame | None,
+    df_pab: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    granularity: str,
+) -> list[dict]:
+    buckets = generate_buckets(start, end, granularity)
+    violations = _fo_ethics_violations_filter(df_avk) if df_avk is not None else None
+
+    rows = []
+    for bucket_start, bucket_end in buckets:
+        row = {"Период": _format_period(bucket_start, bucket_end, granularity)}
+        if df_pab is None:
+            row["Кол-во проверок"] = NOT_UPLOADED
+        else:
+            in_bucket = df_pab[(df_pab["date"] >= bucket_start) & (df_pab["date"] <= bucket_end)]
+            row["Кол-во проверок"] = int(len(in_bucket))
+        if violations is None:
+            row["Кол-во нарушений"] = NOT_UPLOADED
+        else:
+            in_bucket = violations[(violations["date"] >= bucket_start) & (violations["date"] <= bucket_end)]
+            row["Кол-во нарушений"] = int(len(in_bucket))
+        row[""] = ""
+        if df_pab is None:
+            row["Кол-во уникальных стоек"] = NOT_UPLOADED
+        else:
+            in_bucket = df_pab[(df_pab["date"] >= bucket_start) & (df_pab["date"] <= bucket_end)]
+            row["Кол-во уникальных стоек"] = int(in_bucket["stand"].dropna().nunique())
+        rows.append(row)
+    return rows
+
+
+def build_fo_ethics_subcategory_table(
+    df_avk: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+) -> list[dict]:
+    in_period = df_avk[
+        (df_avk["date"] >= start) & (df_avk["date"] <= end) & (df_avk["category"] == FO_ETHICS_CATEGORY)
+    ]
+    conclusion = in_period["conclusion"]
+    counted = in_period[(conclusion == WITH_FAULT_CONCLUSION) | conclusion.isna()]
+
+    rows = []
+    for subcategory in sorted(in_period["subcategory"].dropna().unique()):
+        subset = counted[counted["subcategory"] == subcategory]
+        descriptions = subset["description"].dropna()
+        canonical_map = _canonicalize_descriptions(descriptions)
+        canonical_counts = descriptions.map(canonical_map).value_counts()
+        rows.append(
+            {
+                "Категория нарушения": subcategory,
+                "Кол-во случаев": int(len(subset)),
+                "Типовые нарушения": "; ".join(canonical_counts.index),
+            }
+        )
+    return rows
+
+
 def _not_uploaded_table(table_id: str, title: str, columns: list[str]) -> dict:
     return {"id": table_id, "title": title, "columns": columns, "message": NOT_UPLOADED, "rows": []}
 
@@ -529,6 +650,7 @@ def build_quality_tables(
     df_grh_rpo: pd.DataFrame | None,
     df_grh_fo_siz: pd.DataFrame | None,
     df_lir: pd.DataFrame | None,
+    df_pab: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
@@ -639,6 +761,27 @@ def build_quality_tables(
             "lir_szv_top_employees", "6.2. Топ-10 сотрудников по нарушениям за всю историю", employee_total_columns
         )
 
+    fo_ethics_columns = ["Период", "Кол-во проверок", "Кол-во нарушений", "", "Кол-во уникальных стоек"]
+    fo_ethics_table = {
+        "id": "fo_ethics",
+        "title": "7. Нарушение ФО, этики",
+        "columns": fo_ethics_columns,
+        "rows": build_fo_ethics_table(df_avk, df_pab, start, end, granularity),
+    }
+
+    fo_ethics_subcategory_columns = ["Категория нарушения", "Кол-во случаев", "Типовые нарушения"]
+    if df_avk is not None:
+        fo_ethics_subcategory_table = {
+            "id": "fo_ethics_subcategory",
+            "title": "7.2. Нарушения за период",
+            "columns": fo_ethics_subcategory_columns,
+            "rows": build_fo_ethics_subcategory_table(df_avk, start, end),
+        }
+    else:
+        fo_ethics_subcategory_table = _not_uploaded_table(
+            "fo_ethics_subcategory", "7.2. Нарушения за период", fo_ethics_subcategory_columns
+        )
+
     return [
         alcohol_table,
         alcohol_detail_table,
@@ -650,4 +793,6 @@ def build_quality_tables(
         lir_table,
         lir_employee_detail_table,
         lir_top_employees_table,
+        fo_ethics_table,
+        fo_ethics_subcategory_table,
     ]

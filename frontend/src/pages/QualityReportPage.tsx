@@ -38,7 +38,7 @@ export default function QualityReportPage() {
     setError(null);
     try {
       const result = await fetchQualitySummary(
-        { perron: perronFile, avk: avkFile, grh: grhFile, lir: lirFile },
+        { perron: perronFile, avk: avkFile, grh: grhFile, lir: lirFile, pab: pabFile },
         startDate,
         endDate,
         granularity
@@ -85,7 +85,15 @@ export default function QualityReportPage() {
           </div>
           <div className="upload-item">
             <h4>3. Проверки PAB</h4>
-            <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите" onFile={setPabFile} />
+            <FileUpload
+              compact
+              accept=".xlsx,.xls"
+              label="Перетащите файл или нажмите"
+              onFile={(f) => {
+                setPabFile(f);
+                invalidateCache();
+              }}
+            />
             {pabFile && <div className="status-msg">{pabFile.name}</div>}
           </div>
           <div className="upload-item">

@@ -6,10 +6,12 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.modules.quality_report.processing import (
     FO_SIZ_CHECKS_SHEET,
     GRANULARITIES,
+    PAB_FO_ETHICS_SHEET,
     RPO_CHECKS_SHEET,
     build_quality_tables,
     read_grh_checks_sheet,
     read_lir_szv_file,
+    read_pab_checks_sheet,
     read_violations_file,
 )
 
@@ -27,6 +29,7 @@ async def quality_summary(
     avk_file: UploadFile | None = File(None),
     grh_file: UploadFile | None = File(None),
     lir_file: UploadFile | None = File(None),
+    pab_file: UploadFile | None = File(None),
     start_date: str = Form(...),
     end_date: str = Form(...),
     granularity: str = Form(...),
@@ -47,6 +50,7 @@ async def quality_summary(
     df_grh_rpo = None
     df_grh_fo_siz = None
     df_lir = None
+    df_pab = None
 
     try:
         if perron_file is not None and perron_file.filename:
@@ -63,12 +67,15 @@ async def quality_summary(
         if lir_file is not None and lir_file.filename:
             _check_excel_filename(lir_file, "Мониторинг LIR/СЗВ")
             df_lir = read_lir_szv_file(BytesIO(await lir_file.read()))
+        if pab_file is not None and pab_file.filename:
+            _check_excel_filename(pab_file, "Проверки PAB")
+            df_pab = read_pab_checks_sheet(BytesIO(await pab_file.read()), PAB_FO_ETHICS_SHEET)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
     tables = build_quality_tables(
-        df_perron, df_avk, df_grh_rpo, df_grh_fo_siz, df_lir, start, end, granularity
+        df_perron, df_avk, df_grh_rpo, df_grh_fo_siz, df_lir, df_pab, start, end, granularity
     )
     return {"tables": tables}

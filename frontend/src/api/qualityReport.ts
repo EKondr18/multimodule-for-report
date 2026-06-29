@@ -15,7 +15,7 @@ interface SummaryResponse {
 }
 
 export async function fetchQualitySummary(
-  files: { perron?: File | null; avk?: File | null; grh?: File | null; lir?: File | null },
+  files: { perron?: File | null; avk?: File | null; grh?: File | null; lir?: File | null; pab?: File | null },
   startDate: string,
   endDate: string,
   granularity: Granularity
@@ -25,6 +25,7 @@ export async function fetchQualitySummary(
   if (files.avk) formData.append("avk_file", files.avk);
   if (files.grh) formData.append("grh_file", files.grh);
   if (files.lir) formData.append("lir_file", files.lir);
+  if (files.pab) formData.append("pab_file", files.pab);
   formData.append("start_date", startDate);
   formData.append("end_date", endDate);
   formData.append("granularity", granularity);
