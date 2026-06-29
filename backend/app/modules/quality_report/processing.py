@@ -7,14 +7,15 @@
 «Проверки GRH» (листы «РПО» и «ФО и СИЗ» — по одному на каждую из таблиц
 3 и 4), «Мониторинг LIR/СЗВ» (лист «LIR СЗВ 2026», колонки «Дата», «ФИО
 Агента», «Описание причины замечания» — для таблиц 6, 6.1, 6.2) и
-«Проверки PAB» (листы «Нарушение ФО, этики», «Оформление РК» и « Сверка
-данных перед выдачей ПТ», в каждом — колонки «Дата», «№ стойки» — для
-таблиц 7, 8, 9 соответственно, вместе с «Нарушения в АВК» в каждой из
-них). Каждая таблица строится из того, что загружено; если для неё не
-хватает нужного файла/листа — вместо данных выводится отметка
-`NOT_UPLOADED` ("Файл не загружен"), на уровне всей таблицы (1, 1.1, 2,
-2.1, 5, 6, 6.1, 6.2, 7.1) либо на уровне отдельных ячеек, если в одной
-таблице разные колонки зависят от разных файлов (3, 4, 7, 8, 9).
+«Проверки PAB» (листы «Нарушение ФО, этики», «Оформление РК», « Сверка
+данных перед выдачей ПТ» и «Оформление багажа», в каждом — колонки
+«Дата», «№ стойки» — для таблиц 7, 8, 9, 10 соответственно, вместе с
+«Нарушения в АВК» в каждой из них). Каждая таблица строится из того, что
+загружено; если для неё не хватает нужного файла/листа — вместо данных
+выводится отметка `NOT_UPLOADED` ("Файл не загружен"), на уровне всей
+таблицы (1, 1.1, 2, 2.1, 5, 6, 6.1, 6.2, 7.1, 11) либо на уровне отдельных
+ячеек, если в одной таблице разные колонки зависят от разных файлов (3,
+4, 7, 8, 9, 10).
 
 Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
 (1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
@@ -22,25 +23,29 @@
 3 и 4 — подкатегория и заключение (файл «Перрон») плюс дата из
 соответствующего листа файла GRH; для таблицы 5 (только файл «Перрон») —
 описание, место, бортовой номер, исполнитель и подразделение; для таблиц
-6, 6.1, 6.2 (только файл «Мониторинг LIR/СЗВ») — дата, ФИО агента и
-описание причины замечания (строка считается замечанием, если в этой
-колонке не написано «без замечаний»); для таблиц 7, 8, 9 — дата и №
-стойки из соответствующего листа файла «Проверки PAB» (кол-во проверок,
-кол-во уникальных стоек) плюс категория/подкатегория и заключение из
-файла «Нарушения в АВК» (кол-во нарушений: для таблицы 7 — категория =
+6, 6.1, 6.2 (только файл «Мониторинг LIR/СЗВ») — дата, ФИО агента,
+описание причины замечания и (если в файле есть колонка с «рейс» в
+названии) № рейса — строка считается замечанием, если в описании причины
+не написано «без замечаний»; для таблиц 7, 8, 9, 10 — дата и № стойки из
+соответствующего листа файла «Проверки PAB» (кол-во проверок, кол-во
+уникальных стоек) плюс категория/подкатегория и заключение из файла
+«Нарушения в АВК» (кол-во нарушений: для таблицы 7 — категория =
 «Нарушение ФО, этики», для таблицы 8 — подкатегория = «Ручная кладь
 оформлена с нарушением», для таблицы 9 — подкатегория = «Проверка данных
-перед выдачей ПТ»; во всех трёх — заключение = «с виной» либо пусто/не
-заполнено, см. `_build_pab_avk_checks_table`); для таблицы 7.1 —
-подкатегория, заключение и описание из того же файла «Нарушения в АВК»
-(по строке на уникальную подкатегорию в категории «Нарушение ФО, этики»;
-«Кол-во случаев» — с тем же условием на заключение, что и в таблице 7;
-«Типовые нарушения» — уникальные описания через «; », где варианты,
-отличающиеся только пробелами/пунктуацией/опечатками, схлопываются в один
-текст, см. `_canonicalize_descriptions`). У таблиц 7, 8, 9 пятая колонка —
-всегда пустая (без заголовка и без данных), оставлена для ручных заметок.
-Строки в детализирующих и списочных таблицах (1.1, 2.1, 5) сортируются по
-дате от старых к новым.
+перед выдачей ПТ», для таблицы 10 — категория = «Оформление багажа»; во
+всех четырёх — заключение = «с виной» либо пусто/не заполнено, см.
+`_build_pab_avk_checks_table`); для таблицы 7.1 — подкатегория, заключение
+и описание из того же файла «Нарушения в АВК» (по строке на уникальную
+подкатегорию в категории «Нарушение ФО, этики»; «Кол-во случаев» — с тем
+же условием на заключение, что и в таблице 7; «Типовые нарушения» —
+уникальные описания через «; », где варианты, отличающиеся только
+пробелами/пунктуацией/опечатками, схлопываются в один текст, см.
+`_canonicalize_descriptions`); для таблицы 11 — дата и заключение из
+объединённых файлов «Перрон»+«Нарушения в АВК» (кол-во строк с заключением
+«с виной» либо пусто/не заполнено, без разбивки по категориям). У таблиц
+7, 8, 9, 10 пятая колонка — всегда пустая (без заголовка и без данных),
+оставлена для ручных заметок. Строки в детализирующих и списочных
+таблицах (1.1, 2.1, 5) сортируются по дате от старых к новым.
 
 ФИО агентов в файле LIR/СЗВ могут заноситься с разным количеством пробелов,
 регистром или опечатками — перед подсчётом по сотруднику такие варианты
@@ -51,7 +56,10 @@
 в исходном файле) не отбрасываются из таблицы 6 — «Кол-во проверок» считает
 все строки с валидной датой за период независимо от наличия ФИО; такие
 строки просто не попадают в таблицы 6.1/6.2, где группировка идёт по
-сотруднику.
+сотруднику. В таблице 6.1 каждая ячейка с числом нарушений сотрудника за
+период, если их больше нуля, дополняется в круглых скобках перечислением
+через «; » пар «№ рейса Дата» по каждому нарушению (склеенных через
+пробел) — см. `build_lir_szv_employee_detail`.
 
 Данные за выбранный период агрегируются по срезам (неделя/месяц/квартал/
 год) календарными границами, с обрезкой первого и последнего интервала по
@@ -109,6 +117,9 @@ PAB_RK_SHEET = "Оформление РК"
 
 PT_VIOLATION_SUBCATEGORY = "Проверка данных перед выдачей ПТ"
 PAB_PT_SHEET = " Сверка данных перед выдачей ПТ"
+
+BAGGAGE_CATEGORY = "Оформление багажа"
+PAB_BAGGAGE_SHEET = "Оформление багажа"
 
 NOT_UPLOADED = "Файл не загружен"
 
@@ -292,15 +303,20 @@ def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
     date_col = _find_column(columns, "дата") or _find_column_contains(columns, "дата")
     agent_col = _find_column_contains(columns, "фио")
     reason_col = _find_column_contains(columns, "причин")
+    flight_col = _find_column_contains(columns, "рейс")
     if date_col is None or agent_col is None or reason_col is None:
         raise ValueError(
             "В файле «Мониторинг LIR/СЗВ» нет колонок «Дата», «ФИО Агента» "
             "и/или «Описание причины замечания»"
         )
 
-    result = df[[date_col, agent_col, reason_col]].rename(
-        columns={date_col: "date", agent_col: "agent_raw", reason_col: "reason_description"}
-    )
+    keep = [date_col, agent_col, reason_col]
+    rename = {date_col: "date", agent_col: "agent_raw", reason_col: "reason_description"}
+    if flight_col is not None:
+        keep.append(flight_col)
+        rename[flight_col] = "flight"
+
+    result = df[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
     result = result.dropna(subset=["date"])
 
@@ -314,6 +330,10 @@ def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
         lambda v: str(v).strip() if pd.notna(v) else ""
     )
     result["has_violation"] = result["reason_description"].str.casefold() != NO_VIOLATIONS_TEXT.casefold()
+    if "flight" in result.columns:
+        result["flight"] = result["flight"].apply(lambda v: str(v).strip() if pd.notna(v) else None)
+    else:
+        result["flight"] = None
     return result.drop(columns=["agent_raw"])
 
 
@@ -353,7 +373,16 @@ def build_lir_szv_employee_detail(
         row = {"ФИО Агента": agent}
         for bucket_start, bucket_end in buckets:
             label = _format_period(bucket_start, bucket_end, granularity)
-            row[label] = int(((agent_data["date"] >= bucket_start) & (agent_data["date"] <= bucket_end)).sum())
+            bucket_rows = agent_data[(agent_data["date"] >= bucket_start) & (agent_data["date"] <= bucket_end)]
+            count = len(bucket_rows)
+            if count == 0:
+                row[label] = 0
+            else:
+                details = "; ".join(
+                    " ".join(part for part in (r["flight"], r["date"].strftime("%d.%m.%Y")) if part)
+                    for _, r in bucket_rows.sort_values("date").iterrows()
+                )
+                row[label] = f"{count} ({details})"
         rows.append(row)
     return rows
 
@@ -586,10 +615,10 @@ def build_safety_violations_table(
     ]
 
 
-def _fo_ethics_violations_filter(df_avk: pd.DataFrame) -> pd.DataFrame:
+def _category_violations_filter(df_avk: pd.DataFrame, category: str) -> pd.DataFrame:
     conclusion = df_avk["conclusion"]
     no_fault_recorded = conclusion.isna()
-    return df_avk[(df_avk["category"] == FO_ETHICS_CATEGORY) & ((conclusion == WITH_FAULT_CONCLUSION) | no_fault_recorded)]
+    return df_avk[(df_avk["category"] == category) & ((conclusion == WITH_FAULT_CONCLUSION) | no_fault_recorded)]
 
 
 def _subcategory_violations_filter(df_avk: pd.DataFrame, subcategory: str) -> pd.DataFrame:
@@ -640,7 +669,18 @@ def build_fo_ethics_table(
     end: pd.Timestamp,
     granularity: str,
 ) -> list[dict]:
-    violations = _fo_ethics_violations_filter(df_avk) if df_avk is not None else None
+    violations = _category_violations_filter(df_avk, FO_ETHICS_CATEGORY) if df_avk is not None else None
+    return _build_pab_avk_checks_table(violations, df_pab, start, end, granularity)
+
+
+def build_baggage_violations_table(
+    df_avk: pd.DataFrame | None,
+    df_pab: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    granularity: str,
+) -> list[dict]:
+    violations = _category_violations_filter(df_avk, BAGGAGE_CATEGORY) if df_avk is not None else None
     return _build_pab_avk_checks_table(violations, df_pab, start, end, granularity)
 
 
@@ -691,6 +731,26 @@ def build_fo_ethics_subcategory_table(
     return rows
 
 
+def build_relative_violations_table(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, granularity: str
+) -> list[dict]:
+    conclusion = df["conclusion"]
+    no_fault_recorded = conclusion.isna()
+    violations = df[(conclusion == WITH_FAULT_CONCLUSION) | no_fault_recorded]
+    buckets = generate_buckets(start, end, granularity)
+
+    rows = []
+    for bucket_start, bucket_end in buckets:
+        in_bucket = violations[(violations["date"] >= bucket_start) & (violations["date"] <= bucket_end)]
+        rows.append(
+            {
+                "Период": _format_period(bucket_start, bucket_end, granularity),
+                "Кол-во нарушений": int(len(in_bucket)),
+            }
+        )
+    return rows
+
+
 def _not_uploaded_table(table_id: str, title: str, columns: list[str]) -> dict:
     return {"id": table_id, "title": title, "columns": columns, "message": NOT_UPLOADED, "rows": []}
 
@@ -704,6 +764,7 @@ def build_quality_tables(
     df_pab_fo_ethics: pd.DataFrame | None,
     df_pab_rk: pd.DataFrame | None,
     df_pab_pt: pd.DataFrame | None,
+    df_pab_baggage: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
@@ -850,6 +911,26 @@ def build_quality_tables(
         "rows": build_pt_violations_table(df_avk, df_pab_pt, start, end, granularity),
     }
 
+    baggage_table = {
+        "id": "baggage_violations",
+        "title": "10. Нарушение правил оформления багажа",
+        "columns": pab_checks_columns,
+        "rows": build_baggage_violations_table(df_avk, df_pab_baggage, start, end, granularity),
+    }
+
+    relative_columns = ["Период", "Кол-во нарушений"]
+    if combined is not None:
+        relative_table = {
+            "id": "relative_violations",
+            "title": "11. Относительные показатели по нарушениям на 1000 рейсов",
+            "columns": relative_columns,
+            "rows": build_relative_violations_table(combined, start, end, granularity),
+        }
+    else:
+        relative_table = _not_uploaded_table(
+            "relative_violations", "11. Относительные показатели по нарушениям на 1000 рейсов", relative_columns
+        )
+
     return [
         alcohol_table,
         alcohol_detail_table,
@@ -865,4 +946,6 @@ def build_quality_tables(
         fo_ethics_subcategory_table,
         rk_table,
         pt_table,
+        baggage_table,
+        relative_table,
     ]

@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.modules.quality_report.processing import (
     FO_SIZ_CHECKS_SHEET,
     GRANULARITIES,
+    PAB_BAGGAGE_SHEET,
     PAB_FO_ETHICS_SHEET,
     PAB_PT_SHEET,
     PAB_RK_SHEET,
@@ -55,6 +56,7 @@ async def quality_summary(
     df_pab_fo_ethics = None
     df_pab_rk = None
     df_pab_pt = None
+    df_pab_baggage = None
 
     try:
         if perron_file is not None and perron_file.filename:
@@ -77,6 +79,7 @@ async def quality_summary(
             df_pab_fo_ethics = read_pab_checks_sheet(BytesIO(pab_raw), PAB_FO_ETHICS_SHEET)
             df_pab_rk = read_pab_checks_sheet(BytesIO(pab_raw), PAB_RK_SHEET)
             df_pab_pt = read_pab_checks_sheet(BytesIO(pab_raw), PAB_PT_SHEET)
+            df_pab_baggage = read_pab_checks_sheet(BytesIO(pab_raw), PAB_BAGGAGE_SHEET)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -91,6 +94,7 @@ async def quality_summary(
         df_pab_fo_ethics,
         df_pab_rk,
         df_pab_pt,
+        df_pab_baggage,
         start,
         end,
         granularity,
