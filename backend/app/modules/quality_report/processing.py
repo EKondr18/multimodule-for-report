@@ -7,13 +7,14 @@
 «Проверки GRH» (листы «РПО» и «ФО и СИЗ» — по одному на каждую из таблиц
 3 и 4), «Мониторинг LIR/СЗВ» (лист «LIR СЗВ 2026», колонки «Дата», «ФИО
 Агента», «Описание причины замечания» — для таблиц 6, 6.1, 6.2) и
-«Проверки PAB» (лист «Нарушение ФО, этики», колонки «Дата», «№ стойки» —
-для таблицы 7, вместе с «Нарушения в АВК» для таблиц 7 и 7.2). Каждая
-таблица строится из того, что загружено; если для неё не хватает нужного
-файла/листа — вместо данных выводится отметка `NOT_UPLOADED` ("Файл не
-загружен"), на уровне всей таблицы (1, 1.1, 2, 2.1, 5, 6, 6.1, 6.2, 7.2)
-либо на уровне отдельных ячеек, если в одной таблице разные колонки
-зависят от разных файлов (3, 4, 7).
+«Проверки PAB» (листы «Нарушение ФО, этики», «Оформление РК» и « Сверка
+данных перед выдачей ПТ», в каждом — колонки «Дата», «№ стойки» — для
+таблиц 7, 8, 9 соответственно, вместе с «Нарушения в АВК» в каждой из
+них). Каждая таблица строится из того, что загружено; если для неё не
+хватает нужного файла/листа — вместо данных выводится отметка
+`NOT_UPLOADED` ("Файл не загружен"), на уровне всей таблицы (1, 1.1, 2,
+2.1, 5, 6, 6.1, 6.2, 7.1) либо на уровне отдельных ячеек, если в одной
+таблице разные колонки зависят от разных файлов (3, 4, 7, 8, 9).
 
 Для таблицы 1 нужны дата и категория нарушения; для детализирующих таблиц
 (1.1 и 2.1) — также описание, исполнитель и подразделение; для таблицы 2
@@ -23,17 +24,20 @@
 описание, место, бортовой номер, исполнитель и подразделение; для таблиц
 6, 6.1, 6.2 (только файл «Мониторинг LIR/СЗВ») — дата, ФИО агента и
 описание причины замечания (строка считается замечанием, если в этой
-колонке не написано «без замечаний»); для таблицы 7 — дата и № стойки из
-листа «Нарушение ФО, этики» файла «Проверки PAB» (кол-во проверок,
-кол-во уникальных стоек) плюс категория и заключение из файла
-«Нарушения в АВК» (кол-во нарушений: категория = «Нарушение ФО, этики» и
-заключение = «с виной» либо пусто/не заполнено); для таблицы 7.2 —
+колонке не написано «без замечаний»); для таблиц 7, 8, 9 — дата и №
+стойки из соответствующего листа файла «Проверки PAB» (кол-во проверок,
+кол-во уникальных стоек) плюс категория/подкатегория и заключение из
+файла «Нарушения в АВК» (кол-во нарушений: для таблицы 7 — категория =
+«Нарушение ФО, этики», для таблицы 8 — подкатегория = «Ручная кладь
+оформлена с нарушением», для таблицы 9 — подкатегория = «Проверка данных
+перед выдачей ПТ»; во всех трёх — заключение = «с виной» либо пусто/не
+заполнено, см. `_build_pab_avk_checks_table`); для таблицы 7.1 —
 подкатегория, заключение и описание из того же файла «Нарушения в АВК»
 (по строке на уникальную подкатегорию в категории «Нарушение ФО, этики»;
 «Кол-во случаев» — с тем же условием на заключение, что и в таблице 7;
 «Типовые нарушения» — уникальные описания через «; », где варианты,
 отличающиеся только пробелами/пунктуацией/опечатками, схлопываются в один
-текст, см. `_canonicalize_descriptions`). У таблицы 7 пятая колонка —
+текст, см. `_canonicalize_descriptions`). У таблиц 7, 8, 9 пятая колонка —
 всегда пустая (без заголовка и без данных), оставлена для ручных заметок.
 Строки в детализирующих и списочных таблицах (1.1, 2.1, 5) сортируются по
 дате от старых к новым.
@@ -99,6 +103,12 @@ DESCRIPTION_SIMILARITY_THRESHOLD = 0.85
 
 FO_ETHICS_CATEGORY = "Нарушение ФО, этики"
 PAB_FO_ETHICS_SHEET = "Нарушение ФО, этики"
+
+RK_VIOLATION_SUBCATEGORY = "Ручная кладь оформлена с нарушением"
+PAB_RK_SHEET = "Оформление РК"
+
+PT_VIOLATION_SUBCATEGORY = "Проверка данных перед выдачей ПТ"
+PAB_PT_SHEET = " Сверка данных перед выдачей ПТ"
 
 NOT_UPLOADED = "Файл не загружен"
 
@@ -582,15 +592,23 @@ def _fo_ethics_violations_filter(df_avk: pd.DataFrame) -> pd.DataFrame:
     return df_avk[(df_avk["category"] == FO_ETHICS_CATEGORY) & ((conclusion == WITH_FAULT_CONCLUSION) | no_fault_recorded)]
 
 
-def build_fo_ethics_table(
-    df_avk: pd.DataFrame | None,
+def _subcategory_violations_filter(df_avk: pd.DataFrame, subcategory: str) -> pd.DataFrame:
+    conclusion = df_avk["conclusion"]
+    no_fault_recorded = conclusion.isna()
+    return df_avk[(df_avk["subcategory"] == subcategory) & ((conclusion == WITH_FAULT_CONCLUSION) | no_fault_recorded)]
+
+
+def _build_pab_avk_checks_table(
+    violations: pd.DataFrame | None,
     df_pab: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
 ) -> list[dict]:
+    """Shared builder for tables 7/8/9: «Кол-во проверок» и «Кол-во уникальных
+    стоек» по листу файла «Проверки PAB», «Кол-во нарушений» по уже
+    отфильтрованным строкам файла «Нарушения в АВК», с пустой 4-й колонкой."""
     buckets = generate_buckets(start, end, granularity)
-    violations = _fo_ethics_violations_filter(df_avk) if df_avk is not None else None
 
     rows = []
     for bucket_start, bucket_end in buckets:
@@ -613,6 +631,39 @@ def build_fo_ethics_table(
             row["Кол-во уникальных стоек"] = int(in_bucket["stand"].dropna().nunique())
         rows.append(row)
     return rows
+
+
+def build_fo_ethics_table(
+    df_avk: pd.DataFrame | None,
+    df_pab: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    granularity: str,
+) -> list[dict]:
+    violations = _fo_ethics_violations_filter(df_avk) if df_avk is not None else None
+    return _build_pab_avk_checks_table(violations, df_pab, start, end, granularity)
+
+
+def build_rk_violations_table(
+    df_avk: pd.DataFrame | None,
+    df_pab: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    granularity: str,
+) -> list[dict]:
+    violations = _subcategory_violations_filter(df_avk, RK_VIOLATION_SUBCATEGORY) if df_avk is not None else None
+    return _build_pab_avk_checks_table(violations, df_pab, start, end, granularity)
+
+
+def build_pt_violations_table(
+    df_avk: pd.DataFrame | None,
+    df_pab: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    granularity: str,
+) -> list[dict]:
+    violations = _subcategory_violations_filter(df_avk, PT_VIOLATION_SUBCATEGORY) if df_avk is not None else None
+    return _build_pab_avk_checks_table(violations, df_pab, start, end, granularity)
 
 
 def build_fo_ethics_subcategory_table(
@@ -650,7 +701,9 @@ def build_quality_tables(
     df_grh_rpo: pd.DataFrame | None,
     df_grh_fo_siz: pd.DataFrame | None,
     df_lir: pd.DataFrame | None,
-    df_pab: pd.DataFrame | None,
+    df_pab_fo_ethics: pd.DataFrame | None,
+    df_pab_rk: pd.DataFrame | None,
+    df_pab_pt: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str,
@@ -761,26 +814,41 @@ def build_quality_tables(
             "lir_szv_top_employees", "6.2. Топ-10 сотрудников по нарушениям за всю историю", employee_total_columns
         )
 
-    fo_ethics_columns = ["Период", "Кол-во проверок", "Кол-во нарушений", "", "Кол-во уникальных стоек"]
+    pab_checks_columns = ["Период", "Кол-во проверок", "Кол-во нарушений", "", "Кол-во уникальных стоек"]
+
     fo_ethics_table = {
         "id": "fo_ethics",
         "title": "7. Нарушение ФО, этики",
-        "columns": fo_ethics_columns,
-        "rows": build_fo_ethics_table(df_avk, df_pab, start, end, granularity),
+        "columns": pab_checks_columns,
+        "rows": build_fo_ethics_table(df_avk, df_pab_fo_ethics, start, end, granularity),
     }
 
     fo_ethics_subcategory_columns = ["Категория нарушения", "Кол-во случаев", "Типовые нарушения"]
     if df_avk is not None:
         fo_ethics_subcategory_table = {
             "id": "fo_ethics_subcategory",
-            "title": "7.2. Нарушения за период",
+            "title": "7.1. Нарушения за период",
             "columns": fo_ethics_subcategory_columns,
             "rows": build_fo_ethics_subcategory_table(df_avk, start, end),
         }
     else:
         fo_ethics_subcategory_table = _not_uploaded_table(
-            "fo_ethics_subcategory", "7.2. Нарушения за период", fo_ethics_subcategory_columns
+            "fo_ethics_subcategory", "7.1. Нарушения за период", fo_ethics_subcategory_columns
         )
+
+    rk_table = {
+        "id": "rk_violations",
+        "title": "8. Нарушение правил оформления РК",
+        "columns": pab_checks_columns,
+        "rows": build_rk_violations_table(df_avk, df_pab_rk, start, end, granularity),
+    }
+
+    pt_table = {
+        "id": "pt_violations",
+        "title": "9. Сверка данных перед выдачей ПТ",
+        "columns": pab_checks_columns,
+        "rows": build_pt_violations_table(df_avk, df_pab_pt, start, end, granularity),
+    }
 
     return [
         alcohol_table,
@@ -795,4 +863,6 @@ def build_quality_tables(
         lir_top_employees_table,
         fo_ethics_table,
         fo_ethics_subcategory_table,
+        rk_table,
+        pt_table,
     ]

@@ -7,6 +7,8 @@ from app.modules.quality_report.processing import (
     FO_SIZ_CHECKS_SHEET,
     GRANULARITIES,
     PAB_FO_ETHICS_SHEET,
+    PAB_PT_SHEET,
+    PAB_RK_SHEET,
     RPO_CHECKS_SHEET,
     build_quality_tables,
     read_grh_checks_sheet,
@@ -50,7 +52,9 @@ async def quality_summary(
     df_grh_rpo = None
     df_grh_fo_siz = None
     df_lir = None
-    df_pab = None
+    df_pab_fo_ethics = None
+    df_pab_rk = None
+    df_pab_pt = None
 
     try:
         if perron_file is not None and perron_file.filename:
@@ -69,13 +73,26 @@ async def quality_summary(
             df_lir = read_lir_szv_file(BytesIO(await lir_file.read()))
         if pab_file is not None and pab_file.filename:
             _check_excel_filename(pab_file, "Проверки PAB")
-            df_pab = read_pab_checks_sheet(BytesIO(await pab_file.read()), PAB_FO_ETHICS_SHEET)
+            pab_raw = await pab_file.read()
+            df_pab_fo_ethics = read_pab_checks_sheet(BytesIO(pab_raw), PAB_FO_ETHICS_SHEET)
+            df_pab_rk = read_pab_checks_sheet(BytesIO(pab_raw), PAB_RK_SHEET)
+            df_pab_pt = read_pab_checks_sheet(BytesIO(pab_raw), PAB_PT_SHEET)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
     tables = build_quality_tables(
-        df_perron, df_avk, df_grh_rpo, df_grh_fo_siz, df_lir, df_pab, start, end, granularity
+        df_perron,
+        df_avk,
+        df_grh_rpo,
+        df_grh_fo_siz,
+        df_lir,
+        df_pab_fo_ethics,
+        df_pab_rk,
+        df_pab_pt,
+        start,
+        end,
+        granularity,
     )
     return {"tables": tables}
