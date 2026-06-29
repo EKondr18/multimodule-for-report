@@ -291,10 +291,23 @@ def build_lir_szv_employee_detail(
     return rows
 
 
-def build_lir_szv_top_employees(df: pd.DataFrame, top_n: int = 10) -> list[dict]:
+def build_lir_szv_top_employees(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, top_n: int = 10
+) -> list[dict]:
     violations = df[df["has_violation"]]
     counts = violations.groupby("agent").size().sort_values(ascending=False).head(top_n)
-    return [{"ФИО Агента": agent, "Кол-во нарушений": int(count)} for agent, count in counts.items()]
+
+    in_period_agents = set(
+        df[(df["date"] >= start) & (df["date"] <= end) & df["has_violation"]]["agent"].dropna()
+    )
+    return [
+        {
+            "ФИО Агента": agent,
+            "Кол-во нарушений": int(count),
+            "За выбранный период": "❗" if agent in in_period_agents else "",
+        }
+        for agent, count in counts.items()
+    ]
 
 
 def _period_end(cur: pd.Timestamp, granularity: str) -> pd.Timestamp:
@@ -596,7 +609,7 @@ def build_quality_tables(
         )
 
     lir_columns = ["Период", "Кол-во проверок", "Кол-во замечаний"]
-    employee_total_columns = ["ФИО Агента", "Кол-во нарушений"]
+    employee_total_columns = ["ФИО Агента", "Кол-во нарушений", "За выбранный период"]
     employee_period_columns = ["ФИО Агента"] + lir_szv_period_labels(start, end, granularity)
     if df_lir is not None:
         lir_table = {
@@ -615,7 +628,7 @@ def build_quality_tables(
             "id": "lir_szv_top_employees",
             "title": "6.2. Топ-10 сотрудников по нарушениям за всю историю",
             "columns": employee_total_columns,
-            "rows": build_lir_szv_top_employees(df_lir),
+            "rows": build_lir_szv_top_employees(df_lir, start, end),
         }
     else:
         lir_table = _not_uploaded_table("lir_szv", "6. Мониторинг LIR/СЗВ", lir_columns)
