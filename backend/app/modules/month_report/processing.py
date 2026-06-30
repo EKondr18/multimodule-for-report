@@ -94,14 +94,54 @@ def read_violations_simple(file_obj: BinaryIO, deduplicate: bool = False) -> pd.
     return result
 
 
+def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
+    """
+    Read AVK violations file and return DataFrame with
+    columns [date, conclusion, department].
+    Used by table 2 (conclusion) and table 3 (department).
+    """
+    raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
+    cols = list(raw.columns)
+
+    date_c = _find_col(cols, "дата")
+    conclusion_c = _find_col(cols, "заключен")
+    dept_c = _find_col(cols, "подразделен")
+
+    if date_c is None or conclusion_c is None:
+        raise ValueError(
+            "В файле «Нарушения в АВК» не найдены столбцы «Дата» и/или «Заключение»"
+        )
+
+    keep = [date_c, conclusion_c]
+    rename = {date_c: "date", conclusion_c: "conclusion"}
+    if dept_c is not None:
+        keep.append(dept_c)
+        rename[dept_c] = "department"
+
+    result = raw[keep].rename(columns=rename)
+    result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
+    result = result.dropna(subset=["date"]).reset_index(drop=True)
+    result["conclusion"] = result["conclusion"].astype(str).str.strip()
+    if "department" in result.columns:
+        result["department"] = result["department"].astype(str).str.strip()
+    else:
+        result["department"] = ""
+    return result
+
+
 def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
-    """Read appeals file (Обращения) and return DataFrame with [date, result, appeal_type]."""
+    """
+    Read appeals file (Обращения) and return DataFrame with
+    [date, result, appeal_type, responsible_services].
+    responsible_services is a frozenset of stripped service names per row.
+    """
     df = pd.read_excel(file_obj, sheet_name=APPEALS_SHEET)
     cols = list(df.columns)
 
     date_c = _find_col(cols, "дата обращени")
     result_c = _find_col(cols, "результат")
     type_c = _find_col(cols, "тип обращени")
+    resp_c = _find_col(cols, "ответственные службы")
 
     if date_c is None or result_c is None:
         raise ValueError(
@@ -113,15 +153,31 @@ def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
     if type_c is not None:
         keep.append(type_c)
         rename[type_c] = "appeal_type"
+    if resp_c is not None:
+        keep.append(resp_c)
+        rename[resp_c] = "responsible_services_raw"
 
     out = df[keep].rename(columns=rename)
     out["date"] = pd.to_datetime(out["date"], errors="coerce", dayfirst=True)
     out = out.dropna(subset=["date"]).reset_index(drop=True)
     out["result"] = out["result"].astype(str).str.strip()
+
     if "appeal_type" in out.columns:
         out["appeal_type"] = out["appeal_type"].astype(str).str.strip()
     else:
         out["appeal_type"] = ""
+
+    def _parse_services(val: object) -> frozenset:
+        if not isinstance(val, str) or not val.strip():
+            return frozenset()
+        return frozenset(s.strip() for s in val.split(",") if s.strip())
+
+    if "responsible_services_raw" in out.columns:
+        out["responsible_services"] = out["responsible_services_raw"].apply(_parse_services)
+        out = out.drop(columns=["responsible_services_raw"])
+    else:
+        out["responsible_services"] = frozenset()
+
     return out
 
 
@@ -323,6 +379,63 @@ def build_violations_appeals_table(
     return rows
 
 
+def build_avk_departments_table(
+    df_avk: pd.DataFrame | None,
+    df_appeals: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[dict]:
+    """
+    Table 3: per-department violation count.
+    Departments come from AVK's 'department' column.
+    For each department:
+      count = AVK rows in period with that department
+              + confirmed appeals in period where responsible_services contains the department
+    Bottom row: ИТОГО.
+    """
+    if df_avk is None:
+        return []
+
+    in_avk = df_avk[
+        (df_avk["date"] >= start) & (df_avk["date"] <= end)
+    ]
+
+    # Unique departments from AVK (preserve order by descending count)
+    dept_counts_avk = (
+        in_avk["department"]
+        .replace("nan", pd.NA)
+        .dropna()
+        .value_counts()
+    )
+    departments = list(dept_counts_avk.index)
+
+    # Confirmed appeals in period
+    confirmed_appeals = None
+    if df_appeals is not None:
+        in_ap = df_appeals[
+            (df_appeals["date"] >= start) & (df_appeals["date"] <= end)
+        ]
+        confirmed_appeals = in_ap[in_ap["result"] == CONFIRMED_RESULT]
+
+    rows = []
+    total = 0
+    for dept in departments:
+        avk_count = int(dept_counts_avk.get(dept, 0))
+
+        appeals_count = 0
+        if confirmed_appeals is not None:
+            appeals_count = int(
+                confirmed_appeals["responsible_services"].apply(lambda s: dept in s).sum()
+            )
+
+        count = avk_count + appeals_count
+        total += count
+        rows.append({"Служба": dept, "Кол-во нарушений": count})
+
+    rows.append({"Служба": "ИТОГО", "Кол-во нарушений": total})
+    return rows
+
+
 def _not_uploaded_table(tid: str, title: str, columns: list[str]) -> dict:
     return {
         "id": tid,
@@ -369,4 +482,17 @@ def build_month_tables(
         "rows": build_violations_appeals_table(df_perron, df_avk, df_appeals, start, end, granularity),
     }
 
-    return [production_table, violations_appeals_table]
+    dept_cols = ["Служба", "Кол-во нарушений"]
+    if df_avk is not None:
+        avk_dept_table = {
+            "id": "avk_departments",
+            "title": "3. Количество нарушений в АВК",
+            "columns": dept_cols,
+            "rows": build_avk_departments_table(df_avk, df_appeals, start, end),
+        }
+    else:
+        avk_dept_table = _not_uploaded_table(
+            "avk_departments", "3. Количество нарушений в АВК", dept_cols
+        )
+
+    return [production_table, violations_appeals_table, avk_dept_table]

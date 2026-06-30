@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.modules.month_report.processing import (
     build_month_tables,
     read_appeals_file,
+    read_avk_full,
     read_production_file,
     read_violations_simple,
 )
@@ -53,7 +54,7 @@ async def month_summary(
             df_perron = read_violations_simple(BytesIO(await perron_file.read()), deduplicate=True)
         if avk_file is not None and avk_file.filename:
             _check_excel(avk_file, "Нарушения в АВК")
-            df_avk = read_violations_simple(BytesIO(await avk_file.read()))
+            df_avk = read_avk_full(BytesIO(await avk_file.read()))
         if appeals_file is not None and appeals_file.filename:
             _check_excel(appeals_file, "Обращения")
             df_appeals = read_appeals_file(BytesIO(await appeals_file.read()))
