@@ -18,6 +18,8 @@ export default function QualityReportPage() {
   const [pabFile, setPabFile] = useState<File | null>(null);
   const [grhFile, setGrhFile] = useState<File | null>(null);
   const [lirFile, setLirFile] = useState<File | null>(null);
+  const [appealsFile, setAppealsFile] = useState<File | null>(null);
+  const [productionFile, setProductionFile] = useState<File | null>(null);
 
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -54,6 +56,20 @@ export default function QualityReportPage() {
   return (
     <div>
       <h1>Отчёт по качеству</h1>
+
+      <div className="card">
+        <div className="station-switch">
+          {GRANULARITIES.map((g) => (
+            <button
+              key={g.id}
+              className={granularity === g.id ? "btn active" : "btn"}
+              onClick={() => setGranularity(g.id)}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="card">
         <div className="upload-grid">
@@ -122,6 +138,36 @@ export default function QualityReportPage() {
             />
             {lirFile && <div className="status-msg">{lirFile.name}</div>}
           </div>
+          {granularity === "month" && (
+            <>
+              <div className="upload-item">
+                <h4>6. Обращения</h4>
+                <FileUpload
+                  compact
+                  accept=".xlsx,.xls"
+                  label="Перетащите файл или нажмите"
+                  onFile={(f) => {
+                    setAppealsFile(f);
+                    invalidateCache();
+                  }}
+                />
+                {appealsFile && <div className="status-msg">{appealsFile.name}</div>}
+              </div>
+              <div className="upload-item">
+                <h4>7. Производственные показатели</h4>
+                <FileUpload
+                  compact
+                  accept=".xlsx,.xls"
+                  label="Перетащите файл или нажмите"
+                  onFile={(f) => {
+                    setProductionFile(f);
+                    invalidateCache();
+                  }}
+                />
+                {productionFile && <div className="status-msg">{productionFile.name}</div>}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -154,19 +200,7 @@ export default function QualityReportPage() {
       </div>
 
       <div className="card">
-        <div className="station-switch">
-          {GRANULARITIES.map((g) => (
-            <button
-              key={g.id}
-              className={granularity === g.id ? "btn active" : "btn"}
-              onClick={() => setGranularity(g.id)}
-            >
-              {g.label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ marginTop: 16 }}>
+        <div>
           <button className="btn" onClick={handleBuild} disabled={!startDate || !endDate || loading}>
             Сформировать
           </button>
