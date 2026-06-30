@@ -97,8 +97,8 @@ def read_violations_simple(file_obj: BinaryIO, deduplicate: bool = False) -> pd.
 def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
     """
     Read AVK violations file and return DataFrame with
-    columns [date, conclusion, department].
-    Used by table 2 (conclusion) and table 3 (department).
+    columns [date, conclusion, department, category].
+    Used by tables 2, 3 and 4.
     """
     raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
     cols = list(raw.columns)
@@ -106,6 +106,7 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
     date_c = _find_col(cols, "дата")
     conclusion_c = _find_col(cols, "заключен")
     dept_c = _find_col(cols, "подразделен")
+    cat_c = _find_col(cols, "категори")
 
     if date_c is None or conclusion_c is None:
         raise ValueError(
@@ -117,6 +118,9 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
     if dept_c is not None:
         keep.append(dept_c)
         rename[dept_c] = "department"
+    if cat_c is not None:
+        keep.append(cat_c)
+        rename[cat_c] = "category"
 
     result = raw[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
@@ -126,6 +130,10 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
         result["department"] = result["department"].astype(str).str.strip()
     else:
         result["department"] = ""
+    if "category" in result.columns:
+        result["category"] = result["category"].astype(str).str.strip()
+    else:
+        result["category"] = ""
     return result
 
 
@@ -381,16 +389,12 @@ def build_violations_appeals_table(
 
 def build_avk_departments_table(
     df_avk: pd.DataFrame | None,
-    df_appeals: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> list[dict]:
     """
-    Table 3: per-department violation count.
-    Departments come from AVK's 'department' column.
-    For each department:
-      count = AVK rows in period with that department
-              + confirmed appeals in period where responsible_services contains the department
+    Table 3: per-department AVK violation count (AVK only).
+    Departments from AVK's 'department' column, ordered descending by count.
     Bottom row: ИТОГО.
     """
     if df_avk is None:
@@ -400,39 +404,74 @@ def build_avk_departments_table(
         (df_avk["date"] >= start) & (df_avk["date"] <= end)
     ]
 
-    # Unique departments from AVK (preserve order by descending count)
-    dept_counts_avk = (
+    dept_counts = (
         in_avk["department"]
         .replace("nan", pd.NA)
         .dropna()
         .value_counts()
     )
-    departments = list(dept_counts_avk.index)
-
-    # Confirmed appeals in period
-    confirmed_appeals = None
-    if df_appeals is not None:
-        in_ap = df_appeals[
-            (df_appeals["date"] >= start) & (df_appeals["date"] <= end)
-        ]
-        confirmed_appeals = in_ap[in_ap["result"] == CONFIRMED_RESULT]
 
     rows = []
     total = 0
-    for dept in departments:
-        avk_count = int(dept_counts_avk.get(dept, 0))
-
-        appeals_count = 0
-        if confirmed_appeals is not None:
-            appeals_count = int(
-                confirmed_appeals["responsible_services"].apply(lambda s: dept in s).sum()
-            )
-
-        count = avk_count + appeals_count
-        total += count
-        rows.append({"Служба": dept, "Кол-во нарушений": count})
+    for dept, count in dept_counts.items():
+        c = int(count)
+        total += c
+        rows.append({"Служба": dept, "Кол-во нарушений": c})
 
     rows.append({"Служба": "ИТОГО", "Кол-во нарушений": total})
+    return rows
+
+
+# Category groups for Table 4 — order defines output row order.
+# Each entry: (display_label, [file_category_values_that_map_to_it])
+_CATEGORY_GROUPS: list[tuple[str, list[str]]] = [
+    ("Регистрация", ["Регистрация"]),
+    ("Оформление багажа", ["Оформление багажа"]),
+    ("Нарушение ФО/этики", ["Нарушение ФО/этики", "Нарушение ФО,этики"]),
+    ("Посадка", ["Посадка"]),
+    ("Своевременность выполнения задач", [
+        "Своевременность назначения и выполнения задач",
+        "Взаимодействие между подразделениями",
+    ]),
+    ("Трудовая дисциплина и безопасность", [
+        "Заполнение_документации",
+        "Внутриобъектовый режим",
+        "Алкогольное и наркотическое опъянение",
+        "Обучение и квалификация персонала",
+    ]),
+    ("Использование оборудования", ["Использование оборудования"]),
+    ("Прилет", ["Прилет"]),
+]
+
+
+def build_avk_categories_table(
+    df_avk: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[dict]:
+    """
+    Table 4: AVK violations (Заключение = «с виной») grouped by Категория.
+    Rows follow _CATEGORY_GROUPS order; bottom row ИТОГО.
+    """
+    if df_avk is None:
+        return []
+
+    in_avk = df_avk[
+        (df_avk["date"] >= start)
+        & (df_avk["date"] <= end)
+        & (df_avk["conclusion"] == WITH_FAULT_CONCLUSION)
+    ]
+
+    cat_series = in_avk["category"]
+
+    rows = []
+    total = 0
+    for label, file_values in _CATEGORY_GROUPS:
+        count = int(cat_series.isin(file_values).sum())
+        total += count
+        rows.append({"Категория": label, "Кол-во нарушений": count})
+
+    rows.append({"Категория": "ИТОГО", "Кол-во нарушений": total})
     return rows
 
 
@@ -488,11 +527,24 @@ def build_month_tables(
             "id": "avk_departments",
             "title": "3. Количество нарушений в АВК",
             "columns": dept_cols,
-            "rows": build_avk_departments_table(df_avk, df_appeals, start, end),
+            "rows": build_avk_departments_table(df_avk, start, end),
         }
     else:
         avk_dept_table = _not_uploaded_table(
             "avk_departments", "3. Количество нарушений в АВК", dept_cols
         )
 
-    return [production_table, violations_appeals_table, avk_dept_table]
+    cat_cols = ["Категория", "Кол-во нарушений"]
+    if df_avk is not None:
+        avk_cat_table = {
+            "id": "avk_categories",
+            "title": "4. Распределение нарушений в АВК",
+            "columns": cat_cols,
+            "rows": build_avk_categories_table(df_avk, start, end),
+        }
+    else:
+        avk_cat_table = _not_uploaded_table(
+            "avk_categories", "4. Распределение нарушений в АВК", cat_cols
+        )
+
+    return [production_table, violations_appeals_table, avk_dept_table, avk_cat_table]
