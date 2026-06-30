@@ -7,8 +7,8 @@ from app.modules.month_report.processing import (
     build_month_tables,
     read_appeals_file,
     read_avk_full,
+    read_perron_full,
     read_production_file,
-    read_violations_simple,
 )
 
 router = APIRouter(prefix="/api/month-report", tags=["month-report"])
@@ -51,7 +51,7 @@ async def month_summary(
     try:
         if perron_file is not None and perron_file.filename:
             _check_excel(perron_file, "Нарушения на перроне")
-            df_perron = read_violations_simple(BytesIO(await perron_file.read()), deduplicate=True)
+            df_perron = read_perron_full(BytesIO(await perron_file.read()))
         if avk_file is not None and avk_file.filename:
             _check_excel(avk_file, "Нарушения в АВК")
             df_avk = read_avk_full(BytesIO(await avk_file.read()))

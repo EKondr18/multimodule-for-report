@@ -95,6 +95,49 @@ def read_violations_simple(file_obj: BinaryIO, deduplicate: bool = False) -> pd.
     return result
 
 
+def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
+    """
+    Read perron violations file (ТАБЛИЦА sheet) and return DataFrame with
+    columns [date, conclusion, department]. Deduplication on
+    (Дата, Описание, Авиакомпания, Место) is always applied.
+    """
+    raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
+    cols = list(raw.columns)
+
+    date_c = _find_col(cols, "дата")
+    conclusion_c = _find_col(cols, "заключен")
+    dept_c = _find_col(cols, "подразделен")
+
+    if date_c is None or conclusion_c is None:
+        raise ValueError(
+            "В файле нарушений на перроне не найдены столбцы «Дата» и/или «Заключение»"
+        )
+
+    # Deduplication
+    desc_c = _find_col(cols, "описан")
+    airline_c = _find_col(cols, "авиакомпани")
+    place_c = _find_col(cols, "мест")
+    dedup_cols = [c for c in [date_c, desc_c, airline_c, place_c] if c is not None]
+    if dedup_cols:
+        raw = raw.drop_duplicates(subset=dedup_cols, keep="first")
+
+    keep = [date_c, conclusion_c]
+    rename = {date_c: "date", conclusion_c: "conclusion"}
+    if dept_c is not None:
+        keep.append(dept_c)
+        rename[dept_c] = "department"
+
+    result = raw[keep].rename(columns=rename)
+    result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
+    result = result.dropna(subset=["date"]).reset_index(drop=True)
+    result["conclusion"] = result["conclusion"].astype(str).str.strip()
+    if "department" in result.columns:
+        result["department"] = result["department"].astype(str).str.strip()
+    else:
+        result["department"] = ""
+    return result
+
+
 def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
     """
     Read AVK violations file and return DataFrame with
@@ -449,6 +492,42 @@ def _norm_cat(s: str) -> str:
     s = re.sub(r"[/,]+", " ", s)   # / and , → space
     s = re.sub(r"\s+", " ", s)
     return s
+
+
+def build_perron_departments_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[dict]:
+    """
+    Table 10: per-department count of perron violations where Заключение = «с виной».
+    Ordered descending; ИТОГО at bottom.
+    """
+    if df_perron is None:
+        return []
+
+    in_perron = df_perron[
+        (df_perron["date"] >= start)
+        & (df_perron["date"] <= end)
+        & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
+    ]
+
+    dept_counts = (
+        in_perron["department"]
+        .replace("nan", pd.NA)
+        .dropna()
+        .value_counts()
+    )
+
+    rows = []
+    total = 0
+    for dept, count in dept_counts.items():
+        c = int(count)
+        total += c
+        rows.append({"Служба": dept, "Кол-во нарушений": c})
+
+    rows.append({"Служба": "ИТОГО", "Кол-во нарушений": total})
+    return rows
 
 
 # Category groups for Table 4 — order defines output row order.
@@ -946,8 +1025,23 @@ def build_month_tables(
     else:
         repeat_table = _not_uploaded_table("avk_repeat_employees", "9.1 Повторяющиеся сотрудники АВК", repeat_cols)
 
+    # Table 10: perron departments
+    perron_dept_cols = ["Служба", "Кол-во нарушений"]
+    if df_perron is not None:
+        perron_dept_table: dict = {
+            "id": "perron_departments",
+            "title": "10. Количество нарушений на перроне",
+            "columns": perron_dept_cols,
+            "rows": build_perron_departments_table(df_perron, start, end),
+        }
+    else:
+        perron_dept_table = _not_uploaded_table(
+            "perron_departments", "10. Количество нарушений на перроне", perron_dept_cols
+        )
+
     return [
         production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
         *subcat_tables,
         employees_table, repeat_table,
+        perron_dept_table,
     ]
