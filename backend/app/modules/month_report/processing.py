@@ -494,6 +494,10 @@ def _norm_cat(s: str) -> str:
     return s
 
 
+# Departments merged into ДСТ for table 10
+_DST_ALIASES = {"ДСТ", "ССТ", "СПТ"}
+
+
 def build_perron_departments_table(
     df_perron: pd.DataFrame | None,
     start: pd.Timestamp,
@@ -501,7 +505,7 @@ def build_perron_departments_table(
 ) -> list[dict]:
     """
     Table 10: per-department count of perron violations where Заключение = «с виной».
-    Ordered descending; ИТОГО at bottom.
+    ССТ and СПТ are merged into ДСТ. Ordered descending; ИТОГО at bottom.
     """
     if df_perron is None:
         return []
@@ -510,7 +514,12 @@ def build_perron_departments_table(
         (df_perron["date"] >= start)
         & (df_perron["date"] <= end)
         & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
-    ]
+    ].copy()
+
+    # Merge ССТ and СПТ into ДСТ
+    in_perron["department"] = in_perron["department"].apply(
+        lambda d: "ДСТ" if d in _DST_ALIASES else d
+    )
 
     dept_counts = (
         in_perron["department"]
