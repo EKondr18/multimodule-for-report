@@ -393,7 +393,7 @@ def build_avk_departments_table(
     end: pd.Timestamp,
 ) -> list[dict]:
     """
-    Table 3: per-department AVK violation count (AVK only).
+    Table 3: per-department count of AVK violations where Заключение = «с виной».
     Departments from AVK's 'department' column, ordered descending by count.
     Bottom row: ИТОГО.
     """
@@ -401,7 +401,9 @@ def build_avk_departments_table(
         return []
 
     in_avk = df_avk[
-        (df_avk["date"] >= start) & (df_avk["date"] <= end)
+        (df_avk["date"] >= start)
+        & (df_avk["date"] <= end)
+        & (df_avk["conclusion"] == WITH_FAULT_CONCLUSION)
     ]
 
     dept_counts = (
@@ -422,12 +424,22 @@ def build_avk_departments_table(
     return rows
 
 
+def _norm_cat(s: str) -> str:
+    """Normalize category name for fuzzy matching: lowercase, collapse spaces, unify separators."""
+    import re
+    s = s.strip().lower()
+    s = re.sub(r"[/,]+", " ", s)   # / and , → space
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
 # Category groups for Table 4 — order defines output row order.
-# Each entry: (display_label, [file_category_values_that_map_to_it])
+# Each entry: (display_label, [file_category_values_that_map_to_it]).
+# Matching is normalized (case-insensitive, / and , treated as space).
 _CATEGORY_GROUPS: list[tuple[str, list[str]]] = [
     ("Регистрация", ["Регистрация"]),
     ("Оформление багажа", ["Оформление багажа"]),
-    ("Нарушение ФО/этики", ["Нарушение ФО/этики", "Нарушение ФО,этики"]),
+    ("Нарушение ФО/этики", ["Нарушение ФО/этики", "Нарушение ФО,этики", "Нарушения ФО/этики", "Нарушения ФО,этики"]),
     ("Посадка", ["Посадка"]),
     ("Своевременность выполнения задач", [
         "Своевременность назначения и выполнения задач",
@@ -443,6 +455,12 @@ _CATEGORY_GROUPS: list[tuple[str, list[str]]] = [
     ("Прилет", ["Прилет"]),
 ]
 
+# Pre-build normalized lookup: norm_value → group_index
+_NORM_CAT_MAP: dict[str, int] = {}
+for _gi, (_lbl, _vals) in enumerate(_CATEGORY_GROUPS):
+    for _v in _vals:
+        _NORM_CAT_MAP[_norm_cat(_v)] = _gi
+
 
 def build_avk_categories_table(
     df_avk: pd.DataFrame | None,
@@ -452,6 +470,7 @@ def build_avk_categories_table(
     """
     Table 4: AVK violations (Заключение = «с виной») grouped by Категория.
     Rows follow _CATEGORY_GROUPS order; bottom row ИТОГО.
+    Category matching is normalized (case-insensitive, / and , treated as space).
     """
     if df_avk is None:
         return []
@@ -462,14 +481,18 @@ def build_avk_categories_table(
         & (df_avk["conclusion"] == WITH_FAULT_CONCLUSION)
     ]
 
-    cat_series = in_avk["category"]
+    counts = [0] * len(_CATEGORY_GROUPS)
+    for raw_cat in in_avk["category"]:
+        gi = _NORM_CAT_MAP.get(_norm_cat(str(raw_cat)))
+        if gi is not None:
+            counts[gi] += 1
 
     rows = []
     total = 0
-    for label, file_values in _CATEGORY_GROUPS:
-        count = int(cat_series.isin(file_values).sum())
-        total += count
-        rows.append({"Категория": label, "Кол-во нарушений": count})
+    for gi, (label, _) in enumerate(_CATEGORY_GROUPS):
+        c = counts[gi]
+        total += c
+        rows.append({"Категория": label, "Кол-во нарушений": c})
 
     rows.append({"Категория": "ИТОГО", "Кол-во нарушений": total})
     return rows
