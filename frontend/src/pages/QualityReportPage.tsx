@@ -1,7 +1,7 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
 import SummaryTable from "../components/SummaryTable";
-import { Granularity, SummaryTable as SummaryTableData, fetchQualitySummary } from "../api/qualityReport";
+import { Granularity, SummaryTable as SummaryTableData, fetchQualitySummary, fetchMonthSummary } from "../api/qualityReport";
 
 const GRANULARITIES: { id: Granularity; label: string }[] = [
   { id: "week", label: "Неделя" },
@@ -39,12 +39,21 @@ export default function QualityReportPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchQualitySummary(
-        { perron: perronFile, avk: avkFile, grh: grhFile, lir: lirFile, pab: pabFile },
-        startDate,
-        endDate,
-        granularity
-      );
+      let result;
+      if (granularity === "month") {
+        result = await fetchMonthSummary(
+          { perron: perronFile, avk: avkFile, appeals: appealsFile, production: productionFile },
+          startDate,
+          endDate
+        );
+      } else {
+        result = await fetchQualitySummary(
+          { perron: perronFile, avk: avkFile, grh: grhFile, lir: lirFile, pab: pabFile },
+          startDate,
+          endDate,
+          granularity
+        );
+      }
       setTablesByGranularity((prev) => ({ ...prev, [granularity]: result.tables }));
     } catch (e) {
       setError((e as Error).message);

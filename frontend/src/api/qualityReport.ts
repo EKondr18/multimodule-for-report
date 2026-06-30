@@ -32,3 +32,19 @@ export async function fetchQualitySummary(
   const res = await fetch(apiUrl("/api/quality-report/summary"), { method: "POST", body: formData });
   return parseErrorOrJson<SummaryResponse>(res);
 }
+
+export async function fetchMonthSummary(
+  files: { perron?: File | null; avk?: File | null; appeals?: File | null; production?: File | null },
+  startDate: string,
+  endDate: string
+): Promise<SummaryResponse> {
+  const formData = new FormData();
+  if (files.perron) formData.append("perron_file", files.perron);
+  if (files.avk) formData.append("avk_file", files.avk);
+  if (files.appeals) formData.append("appeals_file", files.appeals);
+  if (files.production) formData.append("production_file", files.production);
+  formData.append("start_date", startDate);
+  formData.append("end_date", endDate);
+  const res = await fetch(apiUrl("/api/month-report/summary"), { method: "POST", body: formData });
+  return parseErrorOrJson<SummaryResponse>(res);
+}
