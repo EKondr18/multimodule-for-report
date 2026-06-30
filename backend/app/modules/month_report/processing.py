@@ -33,6 +33,8 @@ WITH_FAULT_CONCLUSION = "с виной"
 CONFIRMED_RESULT = "Подтверждено"
 NOT_UPLOADED = "Файл не загружен"
 
+EXCLUDED_APPEAL_TYPES = {"Информационное письмо", "Благодарность", "Исходящее"}
+
 PRODUCTION_ROWS = ["Рейсы", "Пассажиры", "Багаж", "Груз", "Почта"]
 # Рейсы и Пассажиры → «Всего (AODB)»; остальные → «Всего»
 _AODB_ROWS = {"Рейсы", "Пассажиры"}
@@ -93,25 +95,34 @@ def read_violations_simple(file_obj: BinaryIO, deduplicate: bool = False) -> pd.
 
 
 def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
-    """Read appeals file (Обращения) and return DataFrame with [date, result]."""
+    """Read appeals file (Обращения) and return DataFrame with [date, result, appeal_type]."""
     df = pd.read_excel(file_obj, sheet_name=APPEALS_SHEET)
     cols = list(df.columns)
 
     date_c = _find_col(cols, "дата обращени")
     result_c = _find_col(cols, "результат")
+    type_c = _find_col(cols, "тип обращени")
 
     if date_c is None or result_c is None:
         raise ValueError(
             "В файле «Обращения» не найдены столбцы «Дата обращения» и/или «Результат»"
         )
 
-    result = df[[date_c, result_c]].rename(
-        columns={date_c: "date", result_c: "result"}
-    )
-    result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
-    result = result.dropna(subset=["date"]).reset_index(drop=True)
-    result["result"] = result["result"].astype(str).str.strip()
-    return result
+    keep = [date_c, result_c]
+    rename = {date_c: "date", result_c: "result"}
+    if type_c is not None:
+        keep.append(type_c)
+        rename[type_c] = "appeal_type"
+
+    out = df[keep].rename(columns=rename)
+    out["date"] = pd.to_datetime(out["date"], errors="coerce", dayfirst=True)
+    out = out.dropna(subset=["date"]).reset_index(drop=True)
+    out["result"] = out["result"].astype(str).str.strip()
+    if "appeal_type" in out.columns:
+        out["appeal_type"] = out["appeal_type"].astype(str).str.strip()
+    else:
+        out["appeal_type"] = ""
+    return out
 
 
 def read_production_file(file_obj: BinaryIO) -> dict[str, int | None]:
@@ -254,6 +265,10 @@ def build_production_table(data: dict[str, int | None]) -> list[dict]:
     return [row]
 
 
+COL_COMBINED = "Нарушения+Обращения (подтвержденные)"
+COL_APPEALS_NO_THANKS = "Обращения (без благодарностей)"
+
+
 def build_violations_appeals_table(
     df_perron: pd.DataFrame | None,
     df_avk: pd.DataFrame | None,
@@ -269,30 +284,40 @@ def build_violations_appeals_table(
     for bucket_start, bucket_end in buckets:
         label = _period_label(bucket_start, granularity)
 
-        if no_violations_data:
-            violations_val: int | str = NOT_UPLOADED
-        else:
-            violations_val = 0
+        # Count с виной from perron + avk
+        violations_count = 0
+        if not no_violations_data:
             for df in [df_perron, df_avk]:
                 if df is None:
                     continue
                 in_period = df[
                     (df["date"] >= bucket_start) & (df["date"] <= bucket_end)
                 ]
-                violations_val += int((in_period["conclusion"] == WITH_FAULT_CONCLUSION).sum())
+                violations_count += int((in_period["conclusion"] == WITH_FAULT_CONCLUSION).sum())
 
-        if df_appeals is None:
-            appeals_val: int | str = NOT_UPLOADED
-        else:
+        # Count confirmed appeals (Результат = Подтверждено)
+        confirmed_count = 0
+        appeals_no_thanks: int | str = NOT_UPLOADED
+        if df_appeals is not None:
             in_period_a = df_appeals[
                 (df_appeals["date"] >= bucket_start) & (df_appeals["date"] <= bucket_end)
             ]
-            appeals_val = int((in_period_a["result"] == CONFIRMED_RESULT).sum())
+            confirmed_count = int((in_period_a["result"] == CONFIRMED_RESULT).sum())
+            # Обращения без исключённых типов
+            appeals_no_thanks = int(
+                (~in_period_a["appeal_type"].isin(EXCLUDED_APPEAL_TYPES)).sum()
+            )
+
+        # Combined column: NOT_UPLOADED only if BOTH sources are missing
+        if no_violations_data and df_appeals is None:
+            combined: int | str = NOT_UPLOADED
+        else:
+            combined = violations_count + confirmed_count
 
         rows.append({
             "Период": label,
-            "Нарушения": violations_val,
-            "Обращения": appeals_val,
+            COL_COMBINED: combined,
+            COL_APPEALS_NO_THANKS: appeals_no_thanks,
         })
 
     return rows
@@ -340,7 +365,7 @@ def build_month_tables(
     violations_appeals_table = {
         "id": "violations_appeals",
         "title": "2. Кол-во нарушений и обращений",
-        "columns": ["Период", "Нарушения", "Обращения"],
+        "columns": ["Период", COL_COMBINED, COL_APPEALS_NO_THANKS],
         "rows": build_violations_appeals_table(df_perron, df_avk, df_appeals, start, end, granularity),
     }
 
