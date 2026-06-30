@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 from typing import BinaryIO
 
 import pandas as pd
@@ -119,6 +120,7 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
         keep.append(dept_c)
         rename[dept_c] = "department"
     subcat_c = _find_col(cols, "подкатегори")
+    exec_c = _find_col(cols, "исполнител")
 
     if cat_c is not None:
         keep.append(cat_c)
@@ -126,6 +128,9 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
     if subcat_c is not None:
         keep.append(subcat_c)
         rename[subcat_c] = "subcategory"
+    if exec_c is not None:
+        keep.append(exec_c)
+        rename[exec_c] = "executor"
 
     result = raw[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
@@ -143,6 +148,10 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
         result["subcategory"] = result["subcategory"].astype(str).str.strip()
     else:
         result["subcategory"] = ""
+    if "executor" in result.columns:
+        result["executor"] = result["executor"].astype(str).str.strip()
+    else:
+        result["executor"] = ""
     return result
 
 
@@ -660,6 +669,173 @@ def build_avk_subcategory_table(
     return rows
 
 
+# ---------------------------------------------------------------------------
+# Employee tables (9 and 9.1)
+# ---------------------------------------------------------------------------
+
+_COL_2M = "Кол-во нарушений (за 2 месяца назад)"
+_COL_1M = "Кол-во нарушений (за 1 месяц назад)"
+_COL_CUR = "Кол-во нарушений (За текущий месяц)"
+_MIN_VIOLATIONS = 3
+
+
+def _normalize_employee(name: str) -> str:
+    return " ".join(str(name).strip().lower().split())
+
+
+def _group_employees(counts: "pd.Series[int]", threshold: float = 0.85) -> dict[str, str]:
+    """Union-find fuzzy grouping of employee names. Returns raw_name → canonical_name."""
+    unique = list(counts.index)
+    n = len(unique)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            if counts.iloc[ri] >= counts.iloc[rj]:
+                parent[rj] = ri
+            else:
+                parent[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if SequenceMatcher(
+                None,
+                _normalize_employee(unique[i]),
+                _normalize_employee(unique[j]),
+            ).ratio() >= threshold:
+                union(i, j)
+
+    return {unique[i]: unique[find(i)] for i in range(n)}
+
+
+def _fault_in_period(
+    df: pd.DataFrame, s: pd.Timestamp, e: pd.Timestamp
+) -> pd.DataFrame:
+    return df[
+        (df["date"] >= s)
+        & (df["date"] <= e)
+        & (df["conclusion"] == WITH_FAULT_CONCLUSION)
+    ]
+
+
+def _prev_month_range(ref: pd.Timestamp, months_back: int) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Return (start, end) for the calendar month `months_back` before ref's month."""
+    anchor = ref.replace(day=1)
+    for _ in range(months_back):
+        anchor = (anchor - pd.Timedelta(days=1)).replace(day=1)
+    end = (anchor + pd.DateOffset(months=1)).replace(day=1) - pd.Timedelta(days=1)
+    return anchor, end
+
+
+def build_avk_employees_table(
+    df_avk: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> tuple[list[dict], list[str]]:
+    """
+    Table 9: employees with >= 3 'с виной' violations in current period,
+    sorted desc, with counts for the two preceding calendar months.
+    Returns (rows, columns).
+    """
+    columns = ["Сотрудник", _COL_2M, _COL_1M, _COL_CUR]
+    if df_avk is None:
+        return [], columns
+
+    prev1_s, prev1_e = _prev_month_range(start, 1)
+    prev2_s, prev2_e = _prev_month_range(start, 2)
+
+    cur_df = _fault_in_period(df_avk, start, end)
+    p1_df = _fault_in_period(df_avk, prev1_s, prev1_e)
+    p2_df = _fault_in_period(df_avk, prev2_s, prev2_e)
+
+    # Build name map from all names across all three periods
+    all_names = (
+        pd.concat([cur_df["executor"], p1_df["executor"], p2_df["executor"]])
+        .replace("nan", pd.NA)
+        .dropna()
+    )
+    if all_names.empty:
+        return [], columns
+    name_map = _group_employees(all_names.value_counts())
+
+    def canonical_counts(df: pd.DataFrame) -> dict[str, int]:
+        s = (
+            df["executor"]
+            .replace("nan", pd.NA)
+            .dropna()
+            .map(lambda n: name_map.get(n, n))
+            .value_counts()
+        )
+        return s.to_dict()
+
+    cur_cnt = canonical_counts(cur_df)
+    p1_cnt = canonical_counts(p1_df)
+    p2_cnt = canonical_counts(p2_df)
+
+    eligible = sorted(
+        [(name, c) for name, c in cur_cnt.items() if c >= _MIN_VIOLATIONS],
+        key=lambda x: -x[1],
+    )
+
+    rows = [
+        {
+            "Сотрудник": name,
+            _COL_2M: p2_cnt.get(name, 0),
+            _COL_1M: p1_cnt.get(name, 0),
+            _COL_CUR: cur_c,
+        }
+        for name, cur_c in eligible
+    ]
+    return rows, columns
+
+
+def build_avk_repeat_employees_table(
+    df_avk: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[dict]:
+    """
+    Table 9.1: employees with >= 3 'с виной' violations in a single subcategory
+    in the current period. Column 'Подразделение/Сотрудник' = dept + ' - ' + name.
+    """
+    if df_avk is None:
+        return []
+
+    cur = _fault_in_period(df_avk, start, end).copy()
+    if cur.empty:
+        return []
+
+    valid_exec = cur["executor"].replace("nan", pd.NA).dropna()
+    if not valid_exec.empty:
+        name_map = _group_employees(valid_exec.value_counts())
+        cur["executor"] = cur["executor"].map(lambda n: name_map.get(n, n) if n != "nan" else pd.NA)
+
+    cur["dept_emp"] = cur["department"].fillna("") + " - " + cur["executor"].fillna("")
+
+    grouped = (
+        cur.groupby(["dept_emp", "subcategory"])
+        .size()
+        .reset_index(name="count")
+    )
+    grouped = grouped[grouped["count"] >= _MIN_VIOLATIONS].sort_values("count", ascending=False)
+
+    return [
+        {
+            "Подразделение/Сотрудник": row["dept_emp"],
+            "Подкатегория нарушения": row["subcategory"],
+            "Кол-во нарушений": int(row["count"]),
+        }
+        for _, row in grouped.iterrows()
+    ]
+
+
 def _not_uploaded_table(tid: str, title: str, columns: list[str]) -> dict:
     return {
         "id": tid,
@@ -745,4 +921,33 @@ def build_month_tables(
         else:
             subcat_tables.append(_not_uploaded_table(tid, title, subcat_cols))
 
-    return [production_table, violations_appeals_table, avk_dept_table, avk_cat_table, *subcat_tables]
+    # Table 9: employees
+    emp_cols_default = ["Сотрудник", _COL_2M, _COL_1M, _COL_CUR]
+    if df_avk is not None:
+        emp_rows, emp_cols = build_avk_employees_table(df_avk, start, end)
+        employees_table: dict = {
+            "id": "avk_employees",
+            "title": "9. Сотрудники АВК",
+            "columns": emp_cols,
+            "rows": emp_rows,
+        }
+    else:
+        employees_table = _not_uploaded_table("avk_employees", "9. Сотрудники АВК", emp_cols_default)
+
+    # Table 9.1: repeat employees
+    repeat_cols = ["Подразделение/Сотрудник", "Подкатегория нарушения", "Кол-во нарушений"]
+    if df_avk is not None:
+        repeat_table: dict = {
+            "id": "avk_repeat_employees",
+            "title": "9.1 Повторяющиеся сотрудники АВК",
+            "columns": repeat_cols,
+            "rows": build_avk_repeat_employees_table(df_avk, start, end),
+        }
+    else:
+        repeat_table = _not_uploaded_table("avk_repeat_employees", "9.1 Повторяющиеся сотрудники АВК", repeat_cols)
+
+    return [
+        production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
+        *subcat_tables,
+        employees_table, repeat_table,
+    ]
