@@ -118,9 +118,14 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
     if dept_c is not None:
         keep.append(dept_c)
         rename[dept_c] = "department"
+    subcat_c = _find_col(cols, "подкатегори")
+
     if cat_c is not None:
         keep.append(cat_c)
         rename[cat_c] = "category"
+    if subcat_c is not None:
+        keep.append(subcat_c)
+        rename[subcat_c] = "subcategory"
 
     result = raw[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
@@ -134,6 +139,10 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
         result["category"] = result["category"].astype(str).str.strip()
     else:
         result["category"] = ""
+    if "subcategory" in result.columns:
+        result["subcategory"] = result["subcategory"].astype(str).str.strip()
+    else:
+        result["subcategory"] = ""
     return result
 
 
@@ -498,6 +507,135 @@ def build_avk_categories_table(
     return rows
 
 
+# ---------------------------------------------------------------------------
+# Subcategory tables (5, 6, 7) — generic builder + per-table definitions
+# ---------------------------------------------------------------------------
+
+def _norm_subcat(s: str) -> str:
+    """Normalize subcategory for matching: lowercase, strip, collapse spaces."""
+    return " ".join(s.strip().lower().split())
+
+
+# (table_id, title, category_norm_keys, groups)
+# groups: list of (display_label, list_of_file_values | None)
+# None → catch-all "Другое"
+
+_SUBCAT_TABLE_5 = (
+    "registration_subcat",
+    "5. Регистрация",
+    # category filter — normalized; covers "регистрация"
+    {"регистрация"},
+    [
+        ("Оформление ручной клади",             ["Ручная кладь оформлена с нарушением"]),
+        ("Информирование пассажиров",           ["Доведение необходимой информации"]),
+        ("Выделение информации на ПТ",          ["Выделение информации на ПТ"]),
+        ("Включение ИМ",                        ["Включение ИМ"]),
+        ("Опрос о запрещенных предметах",       ["Не запрашивает запрещенные предметы в багаже/РК"]),
+        ("Приглашение пассажиров на стойку",    ["Не приглашает пассажиров на стойку"]),
+        ("Проверка данных перед выдачей ПТ",    ["Проверка данных перед выдачей ПТ"]),
+        ("Предложение дополнительных услуг",    ["Предложение дополнительных услуг"]),
+        ("Процедура регистрации",               ["Процедура регистрации"]),
+        ("Дубликат посадочного талона",         ["Дубликат посадочного талона"]),
+        ("Рассадка пассажиров на ВС",           ["Рассадка пассажиров на ВС"]),
+        ("Блокировка ПК",                       ["Блокировка ПК"]),
+        ("Установка табличек ОГ",               ["Информационная табличка ОГ"]),
+        ("Ошибки при проверке паспортов/виз",   ["Проверка паспортных данных"]),
+        ("Использование продукции АК",          ["Установка продукции компании, калибратора, ПТ, ББ"]),
+        ("Обслуживание несопровождаемых детей", ["Несопровождаемый ребенок"]),
+        ("Обслуживание ММП",                    ["Пассажиры из числа инвалидов"]),
+        ("Другое",                              None),
+    ],
+)
+
+_SUBCAT_TABLE_6 = (
+    "baggage_subcat",
+    "6. Оформление багажа",
+    {"оформление багажа"},
+    [
+        ("Маркировка багажа",           ["Маркировка багажа"]),
+        ("Отправка багажа по ленте",    ["Отправка багажа по ленте"]),
+        ("Фиксация повреждения багажа", ["Фиксация повреждения багажа"]),
+        ("Оплата за СНБ",               ["Оплата за СНБ"]),
+        ("Сдвоенный багаж",             ["Сдвоенный багаж"]),
+        ("Опрос о принадлежности багажа", ["Опрос о принадлежности багажа"]),
+        ("Другое",                      None),
+    ],
+)
+
+_SUBCAT_TABLE_7 = (
+    "fo_ethics_subcat",
+    "7. Нарушение ФО/этики",
+    # normalized form of "нарушение фо этики" covers all separators
+    {"нарушение фо этики", "нарушения фо этики"},
+    [
+        ("Несоблюдение этики общения",              ["Несоблюдение этики общения"]),
+        ("Использование личного МТ",                ["Использование личного МТ"]),
+        ("Фразеология",                             ["Фразеология"]),
+        ("Внешний вид",                             ["Внешний вид"]),
+        ("Бейдж прикреплен не верно/отсутствует",  ["Бейдж прикреплен не верно/отсутствует",
+                                                     "Бейдж прикреплен не верно/ отсутствует"]),
+        ("Нарушение ФО",                            ["Нарушение ФО"]),
+        ("Прием пищи в неположенном месте",         ["Прием пищи в неположенном месте"]),
+        ("Соблюдение чистоты и порядка",            ["Соблюдение чистоты и порядка"]),
+        ("Другое",                                  None),
+    ],
+)
+
+_SUBCAT_TABLES = [_SUBCAT_TABLE_5, _SUBCAT_TABLE_6, _SUBCAT_TABLE_7]
+
+
+def build_avk_subcategory_table(
+    df_avk: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    category_norm_keys: set[str],
+    groups: list[tuple[str, list[str] | None]],
+) -> list[dict]:
+    """
+    Generic subcategory breakdown for AVK violations (Заключение = «с виной»).
+    category_norm_keys: set of normalized category values to match.
+    groups: (display_label, file_subcat_values | None); None = catch-all.
+    """
+    if df_avk is None:
+        return []
+
+    mask = (
+        (df_avk["date"] >= start)
+        & (df_avk["date"] <= end)
+        & (df_avk["conclusion"] == WITH_FAULT_CONCLUSION)
+        & (df_avk["category"].apply(_norm_cat).isin(category_norm_keys))
+    )
+    in_avk = df_avk[mask]
+
+    # Build normalized lookup: norm_subcat → group_index
+    norm_map: dict[str, int] = {}
+    catchall_idx: int | None = None
+    for gi, (_, vals) in enumerate(groups):
+        if vals is None:
+            catchall_idx = gi
+        else:
+            for v in vals:
+                norm_map[_norm_subcat(v)] = gi
+
+    counts = [0] * len(groups)
+    for raw_sub in in_avk["subcategory"]:
+        gi = norm_map.get(_norm_subcat(str(raw_sub)))
+        if gi is not None:
+            counts[gi] += 1
+        elif catchall_idx is not None:
+            counts[catchall_idx] += 1
+
+    rows: list[dict] = []
+    total = 0
+    for gi, (label, _) in enumerate(groups):
+        c = counts[gi]
+        total += c
+        rows.append({"Подкатегория": label, "Кол-во нарушений": c})
+
+    rows.append({"Подкатегория": "ИТОГО", "Кол-во нарушений": total})
+    return rows
+
+
 def _not_uploaded_table(tid: str, title: str, columns: list[str]) -> dict:
     return {
         "id": tid,
@@ -570,4 +708,17 @@ def build_month_tables(
             "avk_categories", "4. Распределение нарушений в АВК", cat_cols
         )
 
-    return [production_table, violations_appeals_table, avk_dept_table, avk_cat_table]
+    subcat_cols = ["Подкатегория", "Кол-во нарушений"]
+    subcat_tables = []
+    for tid, title, cat_keys, groups in _SUBCAT_TABLES:
+        if df_avk is not None:
+            subcat_tables.append({
+                "id": tid,
+                "title": title,
+                "columns": subcat_cols,
+                "rows": build_avk_subcategory_table(df_avk, start, end, cat_keys, groups),
+            })
+        else:
+            subcat_tables.append(_not_uploaded_table(tid, title, subcat_cols))
+
+    return [production_table, violations_appeals_table, avk_dept_table, avk_cat_table, *subcat_tables]
