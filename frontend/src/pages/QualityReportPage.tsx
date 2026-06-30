@@ -34,17 +34,20 @@ export default function QualityReportPage() {
 
   const invalidateCache = () => setTablesByGranularity({});
 
+  const isAggregated = granularity === "month" || granularity === "quarter" || granularity === "year";
+
   const handleBuild = async () => {
     if (!startDate || !endDate) return;
     setLoading(true);
     setError(null);
     try {
       let result;
-      if (granularity === "month") {
+      if (isAggregated) {
         result = await fetchMonthSummary(
           { perron: perronFile, avk: avkFile, appeals: appealsFile, production: productionFile },
           startDate,
-          endDate
+          endDate,
+          granularity
         );
       } else {
         result = await fetchQualitySummary(
@@ -81,53 +84,31 @@ export default function QualityReportPage() {
       </div>
 
       <div className="card">
-        {granularity === "month" ? (
-          <div className="upload-grid-month">
-            <div className="upload-row-3">
-              <div className="upload-item">
-                <h4>1. Нарушения на перроне</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setPerronFile(f); invalidateCache(); }} />
-                {perronFile && <div className="status-msg">{perronFile.name}</div>}
-              </div>
-              <div className="upload-item">
-                <h4>2. Нарушения в АВК</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setAvkFile(f); invalidateCache(); }} />
-                {avkFile && <div className="status-msg">{avkFile.name}</div>}
-              </div>
-              <div className="upload-item">
-                <h4>6. Обращения</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setAppealsFile(f); invalidateCache(); }} />
-                {appealsFile && <div className="status-msg">{appealsFile.name}</div>}
-              </div>
+        {isAggregated ? (
+          <div className="upload-row-4">
+            <div className="upload-item">
+              <h4>1. Нарушения на перроне</h4>
+              <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
+                onFile={(f) => { setPerronFile(f); invalidateCache(); }} />
+              {perronFile && <div className="status-msg">{perronFile.name}</div>}
             </div>
-            <div className="upload-row-4">
-              <div className="upload-item">
-                <h4>3. Проверки PAB</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setPabFile(f); invalidateCache(); }} />
-                {pabFile && <div className="status-msg">{pabFile.name}</div>}
-              </div>
-              <div className="upload-item">
-                <h4>4. Проверки GRH</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setGrhFile(f); invalidateCache(); }} />
-                {grhFile && <div className="status-msg">{grhFile.name}</div>}
-              </div>
-              <div className="upload-item">
-                <h4>5. Мониторинг LIR/СЗВ</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setLirFile(f); invalidateCache(); }} />
-                {lirFile && <div className="status-msg">{lirFile.name}</div>}
-              </div>
-              <div className="upload-item">
-                <h4>7. Производственные показатели</h4>
-                <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
-                  onFile={(f) => { setProductionFile(f); invalidateCache(); }} />
-                {productionFile && <div className="status-msg">{productionFile.name}</div>}
-              </div>
+            <div className="upload-item">
+              <h4>2. Нарушения в АВК</h4>
+              <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
+                onFile={(f) => { setAvkFile(f); invalidateCache(); }} />
+              {avkFile && <div className="status-msg">{avkFile.name}</div>}
+            </div>
+            <div className="upload-item">
+              <h4>3. Обращения</h4>
+              <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
+                onFile={(f) => { setAppealsFile(f); invalidateCache(); }} />
+              {appealsFile && <div className="status-msg">{appealsFile.name}</div>}
+            </div>
+            <div className="upload-item">
+              <h4>4. Производственные показатели</h4>
+              <FileUpload compact accept=".xlsx,.xls" label="Перетащите файл или нажмите"
+                onFile={(f) => { setProductionFile(f); invalidateCache(); }} />
+              {productionFile && <div className="status-msg">{productionFile.name}</div>}
             </div>
           </div>
         ) : (

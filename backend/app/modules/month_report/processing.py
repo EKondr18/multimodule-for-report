@@ -172,8 +172,20 @@ def read_production_file(file_obj: BinaryIO) -> dict[str, int | None]:
 # Period helpers
 # ---------------------------------------------------------------------------
 
+_RU_QUARTERS = {1: "I", 2: "II", 3: "III", 4: "IV"}
+
+
 def _month_label(ts: pd.Timestamp) -> str:
     return f"{_RU_MONTHS[ts.month]} {ts.year}"
+
+
+def _quarter_label(ts: pd.Timestamp) -> str:
+    q = (ts.month - 1) // 3 + 1
+    return f"{_RU_QUARTERS[q]} кв. {ts.year}"
+
+
+def _year_label(ts: pd.Timestamp) -> str:
+    return str(ts.year)
 
 
 def _month_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
@@ -185,6 +197,51 @@ def _month_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Time
         buckets.append((current, bucket_end))
         current = next_month
     return buckets
+
+
+def _quarter_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    buckets = []
+    # align to quarter start
+    m = start.month
+    q_start_month = ((m - 1) // 3) * 3 + 1
+    current = start.replace(month=q_start_month, day=1)
+    while current <= end:
+        q_end_month = q_start_month + 2
+        next_q = (current + pd.DateOffset(months=3)).replace(day=1)
+        bucket_end = min(next_q - pd.Timedelta(days=1), end)
+        buckets.append((current, bucket_end))
+        current = next_q
+        q_start_month = current.month
+    return buckets
+
+
+def _year_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    buckets = []
+    current = start.replace(month=1, day=1)
+    while current <= end:
+        next_year = current.replace(year=current.year + 1)
+        bucket_end = min(next_year - pd.Timedelta(days=1), end)
+        buckets.append((current, bucket_end))
+        current = next_year
+    return buckets
+
+
+def _period_buckets(
+    start: pd.Timestamp, end: pd.Timestamp, granularity: str
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    if granularity == "quarter":
+        return _quarter_buckets(start, end)
+    if granularity == "year":
+        return _year_buckets(start, end)
+    return _month_buckets(start, end)
+
+
+def _period_label(ts: pd.Timestamp, granularity: str) -> str:
+    if granularity == "quarter":
+        return _quarter_label(ts)
+    if granularity == "year":
+        return _year_label(ts)
+    return _month_label(ts)
 
 
 # ---------------------------------------------------------------------------
@@ -203,13 +260,14 @@ def build_violations_appeals_table(
     df_appeals: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
+    granularity: str = "month",
 ) -> list[dict]:
     no_violations_data = df_perron is None and df_avk is None
-    buckets = _month_buckets(start, end)
+    buckets = _period_buckets(start, end, granularity)
 
     rows = []
     for bucket_start, bucket_end in buckets:
-        label = _month_label(bucket_start)
+        label = _period_label(bucket_start, granularity)
 
         if no_violations_data:
             violations_val: int | str = NOT_UPLOADED
@@ -261,6 +319,7 @@ def build_month_tables(
     production_data: dict[str, int | None] | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
+    granularity: str = "month",
 ) -> list[dict]:
     production_columns = PRODUCTION_ROWS
 
@@ -282,7 +341,7 @@ def build_month_tables(
         "id": "violations_appeals",
         "title": "2. Кол-во нарушений и обращений",
         "columns": ["Период", "Нарушения", "Обращения"],
-        "rows": build_violations_appeals_table(df_perron, df_avk, df_appeals, start, end),
+        "rows": build_violations_appeals_table(df_perron, df_avk, df_appeals, start, end, granularity),
     }
 
     return [production_table, violations_appeals_table]

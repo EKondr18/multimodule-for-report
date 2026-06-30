@@ -18,6 +18,9 @@ def _check_excel(file: UploadFile, label: str) -> None:
         raise HTTPException(400, f"«{label}» — ожидается excel-файл")
 
 
+ALLOWED_GRANULARITIES = {"month", "quarter", "year"}
+
+
 @router.post("/summary")
 async def month_summary(
     perron_file: UploadFile | None = File(None),
@@ -26,7 +29,11 @@ async def month_summary(
     production_file: UploadFile | None = File(None),
     start_date: str = Form(...),
     end_date: str = Form(...),
+    granularity: str = Form("month"),
 ):
+    if granularity not in ALLOWED_GRANULARITIES:
+        raise HTTPException(400, f"Неизвестный временной срез: {granularity}")
+
     try:
         start = pd.to_datetime(start_date)
         end = pd.to_datetime(end_date)
@@ -58,5 +65,5 @@ async def month_summary(
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
-    tables = build_month_tables(df_perron, df_avk, df_appeals, production_data, start, end)
+    tables = build_month_tables(df_perron, df_avk, df_appeals, production_data, start, end, granularity)
     return {"tables": tables}

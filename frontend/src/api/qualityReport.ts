@@ -36,7 +36,8 @@ export async function fetchQualitySummary(
 export async function fetchMonthSummary(
   files: { perron?: File | null; avk?: File | null; appeals?: File | null; production?: File | null },
   startDate: string,
-  endDate: string
+  endDate: string,
+  granularity: Granularity
 ): Promise<SummaryResponse> {
   const formData = new FormData();
   if (files.perron) formData.append("perron_file", files.perron);
@@ -45,6 +46,7 @@ export async function fetchMonthSummary(
   if (files.production) formData.append("production_file", files.production);
   formData.append("start_date", startDate);
   formData.append("end_date", endDate);
+  formData.append("granularity", granularity);
   const res = await fetch(apiUrl("/api/month-report/summary"), { method: "POST", body: formData });
   return parseErrorOrJson<SummaryResponse>(res);
 }

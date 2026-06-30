@@ -5,13 +5,20 @@ interface Props {
   table: SummaryTableData;
 }
 
+function formatDisplay(value: string | number | undefined): string {
+  if (typeof value === "number") {
+    return value.toLocaleString("ru-RU");
+  }
+  return value != null ? String(value) : "";
+}
+
 export default function SummaryTable({ table }: Props) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     const lines = [
       table.columns.join("\t"),
-      ...table.rows.map((row) => table.columns.map((col) => row[col]).join("\t")),
+      ...table.rows.map((row) => table.columns.map((col) => row[col] ?? "").join("\t")),
     ];
     await navigator.clipboard.writeText(lines.join("\n"));
     setCopied(true);
@@ -47,7 +54,7 @@ export default function SummaryTable({ table }: Props) {
           {table.rows.map((row, idx) => (
             <tr key={idx}>
               {table.columns.map((col) => (
-                <td key={col}>{row[col]}</td>
+                <td key={col}>{formatDisplay(row[col])}</td>
               ))}
             </tr>
           ))}
