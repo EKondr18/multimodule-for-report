@@ -108,6 +108,7 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     conclusion_c = _find_col(cols, "заключен")
     dept_c = _find_col(cols, "подразделен")
     cat_c = _find_col(cols, "категори")
+    subcat_c = _find_col(cols, "подкатегори") or _find_col(cols, "типов")
 
     if date_c is None or conclusion_c is None:
         raise ValueError(
@@ -130,19 +131,19 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     if cat_c is not None:
         keep.append(cat_c)
         rename[cat_c] = "category"
+    if subcat_c is not None:
+        keep.append(subcat_c)
+        rename[subcat_c] = "subcategory"
 
     result = raw[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
     result = result.dropna(subset=["date"]).reset_index(drop=True)
     result["conclusion"] = result["conclusion"].astype(str).str.strip()
-    if "department" in result.columns:
-        result["department"] = result["department"].astype(str).str.strip()
-    else:
-        result["department"] = ""
-    if "category" in result.columns:
-        result["category"] = result["category"].astype(str).str.strip()
-    else:
-        result["category"] = ""
+    for col in ("department", "category", "subcategory"):
+        if col in result.columns:
+            result[col] = result[col].astype(str).str.strip()
+        else:
+            result[col] = ""
     return result
 
 
@@ -500,6 +501,13 @@ def _norm_cat(s: str) -> str:
     s = re.sub(r"[/,_]+", " ", s)  # /, , and _ → space
     s = re.sub(r"\s+", " ", s)
     return s
+
+
+def _clean_display(s: str) -> str:
+    """Clean category/subcategory name for display: remove underscores, normalize spaces."""
+    import re
+    s = re.sub(r"_+", " ", s.strip())
+    return re.sub(r"\s+", " ", s).strip()
 
 
 # Departments merged into ДСТ for table 10
@@ -933,7 +941,212 @@ def build_avk_repeat_employees_table(
 
 
 # ---------------------------------------------------------------------------
-# Table 11: perron violation distribution by category + dept breakdown
+# Tables 11–13: per-category / per-subcategory perron breakdowns
+# ---------------------------------------------------------------------------
+
+_AVS_CATEGORIES = [
+    "Контроль загрузки выгрузки ВС",
+    "Подгон отгон спецтехники к от ВС",
+    "Установка УК и конусов",
+    "Встреча ВС на МС",
+    "Подготовка перрона спецтехники к НО ВС",
+    "Внешний осмотр ВС",
+    "Несвоевременный вывоз СТ с МС",
+    "Заправка дозаправка слив топлива",
+    "Заключительные работы по обслуживанию ВС",
+    "Обслуживание WTS и VS",
+    "Обеспечение стоянки ВС",
+    "ПОО",
+    "Открытие закрытие дверей и люков",
+    "Центровка ВС",
+    "Использование оборудования",
+    "Заполнение документации",
+    "Повреждение ВС",
+    "Порча имущества",
+    "Обслуживание ВС при неблагоприятных МУ",
+]
+
+_NVZ_CATEGORIES = [
+    "Своевременность назначения и выполнения задач",
+    "Взаимодействие между подразделениями",
+]
+
+_ETS_CATEGORIES = [
+    "Несоблюдение ПДД",
+    "Световое обозначение транспорта",
+    "Обеспечение остановки и стоянки ТС",
+    "ДТП",
+    "Движение без регулировщика",
+    "Осмотр ТС",
+    "Чистота ТС",
+    "Отказы и неисправности ТС",
+]
+
+
+def _filter_perron_cats(
+    df: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    file_categories: list[str],
+) -> pd.DataFrame:
+    norm_set = {_norm_cat(c) for c in file_categories}
+    return df[
+        (df["date"] >= start)
+        & (df["date"] <= end)
+        & (df["conclusion"] == WITH_FAULT_CONCLUSION)
+        & (df["category"].apply(_norm_cat).isin(norm_set))
+    ].copy()
+
+
+def _merge_dst(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["department"] = df["department"].apply(lambda d: "ДСТ" if d in _DST_ALIASES else d)
+    return df
+
+
+def _dept_breakdown(df: pd.DataFrame) -> dict[str, int]:
+    df = _merge_dst(df)
+    counts = df["department"].replace("nan", pd.NA).dropna().value_counts()
+    return {d: int(c) for d, c in counts.items()}
+
+
+def _format_dept_str(dept_counts: dict[str, int]) -> str:
+    return ", ".join(f"{d} – {c}" for d, c in dept_counts.items())
+
+
+def build_avs_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 11b: Обслуживание ВС — each specific category, count only."""
+    col_cat, col_cnt = "Категория", "Кол-во нарушений"
+    columns = [col_cat, col_cnt]
+    if df_perron is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    sub = _filter_perron_cats(df_perron, start, end, _AVS_CATEGORIES)
+    total = 0
+    rows = []
+    for cat in _AVS_CATEGORIES:
+        cnt = int((sub["category"].apply(_norm_cat) == _norm_cat(cat)).sum())
+        total += cnt
+        rows.append({col_cat: _clean_display(cat), col_cnt: cnt})
+    rows.append({col_cat: "ИТОГО", col_cnt: total})
+    return {"columns": columns, "rows": rows}
+
+
+def build_nvz_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 12: Назначение и выполнение задач — categories + dept breakdown."""
+    col_cat, col_cnt = "Категория", "Кол-во нарушений"
+    col_dept, col_dc = "Служба", "Кол-во нарушений (служба)"
+    columns = [col_cat, col_cnt, col_dept, col_dc]
+    if df_perron is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    sub = _filter_perron_cats(df_perron, start, end, _NVZ_CATEGORIES)
+    row_groups = []
+    grand_total = 0
+    all_depts: dict[str, int] = {}
+
+    for cat in _NVZ_CATEGORIES:
+        mask = sub["category"].apply(_norm_cat) == _norm_cat(cat)
+        grp = sub[mask]
+        cnt = len(grp)
+        grand_total += cnt
+        depts = _dept_breakdown(grp)
+        for d, c in depts.items():
+            all_depts[d] = all_depts.get(d, 0) + c
+        row_groups.append({
+            col_cat: _clean_display(cat),
+            col_cnt: cnt,
+            "details": [{col_dept: d, col_dc: c} for d, c in depts.items()],
+        })
+
+    # ИТОГО row group
+    itogo_depts = sorted(all_depts.items(), key=lambda x: -x[1])
+    row_groups.append({
+        col_cat: "ИТОГО",
+        col_cnt: grand_total,
+        "details": [{col_dept: d, col_dc: c} for d, c in itogo_depts],
+    })
+    return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
+
+
+def build_ets_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """
+    Table 13: Эксплуатация ТС — categories + dept breakdown +
+    top-2 subcategories per category with their dept breakdown as text.
+    """
+    col_cat, col_cnt = "Категория", "Кол-во нарушений"
+    col_dept, col_dc = "Служба", "Кол-во нарушений (служба)"
+    col_sub, col_sdepts = "Типовые нарушения", "Кол-во по службам"
+    columns = [col_cat, col_cnt, col_dept, col_dc, col_sub, col_sdepts]
+
+    if df_perron is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    sub = _filter_perron_cats(df_perron, start, end, _ETS_CATEGORIES)
+    row_groups = []
+    grand_total = 0
+    all_depts: dict[str, int] = {}
+
+    for cat in _ETS_CATEGORIES:
+        mask = sub["category"].apply(_norm_cat) == _norm_cat(cat)
+        grp = sub[mask].copy()
+        cnt = len(grp)
+        grand_total += cnt
+        depts = _dept_breakdown(grp)
+        for d, c in depts.items():
+            all_depts[d] = all_depts.get(d, 0) + c
+
+        # dept detail rows
+        dept_rows = [{col_dept: d, col_dc: c, col_sub: "", col_sdepts: ""}
+                     for d, c in depts.items()]
+
+        # top-2 subcategory rows
+        subcat_rows: list[dict] = []
+        if "subcategory" in grp.columns:
+            grp_merged = _merge_dst(grp)
+            grp_merged["subcategory"] = grp_merged["subcategory"].apply(_clean_display)
+            top2 = (
+                grp_merged["subcategory"]
+                .replace("nan", pd.NA)
+                .dropna()
+                .value_counts()
+                .head(2)
+            )
+            for sc_name in top2.index:
+                sc_grp = grp_merged[grp_merged["subcategory"] == sc_name]
+                sc_depts = sc_grp["department"].replace("nan", pd.NA).dropna().value_counts()
+                dept_str = _format_dept_str({d: int(c) for d, c in sc_depts.items()})
+                subcat_rows.append({col_dept: "", col_dc: "", col_sub: sc_name, col_sdepts: dept_str})
+
+        row_groups.append({
+            col_cat: _clean_display(cat),
+            col_cnt: cnt,
+            "details": dept_rows + subcat_rows,
+        })
+
+    itogo_depts = sorted(all_depts.items(), key=lambda x: -x[1])
+    row_groups.append({
+        col_cat: "ИТОГО",
+        col_cnt: grand_total,
+        "details": [{col_dept: d, col_dc: c, col_sub: "", col_sdepts: ""} for d, c in itogo_depts],
+    })
+    return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
+
+
+# ---------------------------------------------------------------------------
+# Table 11 (distribution): perron violation distribution by category + dept breakdown
 # ---------------------------------------------------------------------------
 
 _PERRON_CAT_GROUPS: list[tuple[str, list[str]]] = [
@@ -1204,9 +1417,26 @@ def build_month_tables(
         **perron_cat_data,
     }
 
+    if df_perron is not None:
+        avs: dict = {"id": "avs_breakdown", "title": "11. Обслуживание ВС",
+                     **build_avs_table(df_perron, start, end)}
+        nvz: dict = {"id": "nvz_breakdown", "title": "12. Назначение и выполнение задач",
+                     **build_nvz_table(df_perron, start, end)}
+        ets: dict = {"id": "ets_breakdown", "title": "13. Эксплуатация ТС",
+                     **build_ets_table(df_perron, start, end)}
+    else:
+        avs = _not_uploaded_table("avs_breakdown", "11. Обслуживание ВС",
+                                  ["Категория", "Кол-во нарушений"])
+        nvz = _not_uploaded_table("nvz_breakdown", "12. Назначение и выполнение задач",
+                                  ["Категория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)"])
+        ets = _not_uploaded_table("ets_breakdown", "13. Эксплуатация ТС",
+                                  ["Категория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)",
+                                   "Типовые нарушения", "Кол-во по службам"])
+
     return [
         production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
         *subcat_tables,
         employees_table, repeat_table,
         perron_dept_table, perron_cat_table,
+        avs, nvz, ets,
     ]
