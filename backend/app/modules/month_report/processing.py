@@ -107,6 +107,7 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     date_c = _find_col(cols, "дата")
     conclusion_c = _find_col(cols, "заключен")
     dept_c = _find_col(cols, "подразделен")
+    cat_c = _find_col(cols, "категори")
 
     if date_c is None or conclusion_c is None:
         raise ValueError(
@@ -126,6 +127,9 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     if dept_c is not None:
         keep.append(dept_c)
         rename[dept_c] = "department"
+    if cat_c is not None:
+        keep.append(cat_c)
+        rename[cat_c] = "category"
 
     result = raw[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
@@ -135,6 +139,10 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
         result["department"] = result["department"].astype(str).str.strip()
     else:
         result["department"] = ""
+    if "category" in result.columns:
+        result["category"] = result["category"].astype(str).str.strip()
+    else:
+        result["category"] = ""
     return result
 
 
@@ -486,10 +494,10 @@ def build_avk_departments_table(
 
 
 def _norm_cat(s: str) -> str:
-    """Normalize category name for fuzzy matching: lowercase, collapse spaces, unify separators."""
+    """Normalize category name: lowercase, collapse spaces, unify separators (/ , _)."""
     import re
     s = s.strip().lower()
-    s = re.sub(r"[/,]+", " ", s)   # / and , → space
+    s = re.sub(r"[/,_]+", " ", s)  # /, , and _ → space
     s = re.sub(r"\s+", " ", s)
     return s
 
@@ -924,6 +932,146 @@ def build_avk_repeat_employees_table(
     ]
 
 
+# ---------------------------------------------------------------------------
+# Table 11: perron violation distribution by category + dept breakdown
+# ---------------------------------------------------------------------------
+
+_PERRON_CAT_GROUPS: list[tuple[str, list[str]]] = [
+    ("Обслуживание ВС", [
+        "Контроль загрузки выгрузки ВС",
+        "Подгон отгон спецтехники к от ВС",
+        "Установка УК и конусов",
+        "Встреча ВС на МС",
+        "Подготовка перрона спецтехники к НО ВС",
+        "Внешний осмотр ВС",
+        "Несвоевременный вывоз СТ с МС",
+        "Заправка дозаправка слив топлива",
+        "Заключительные работы по обслуживанию ВС",
+        "Обслуживание WTS и VS",
+        "Обеспечение стоянки ВС",
+        "ПОО",
+        "Открытие закрытие дверей и люков",
+        "Центровка ВС",
+        "Использование оборудования",
+        "Заполнение документации",
+        "Повреждение ВС",
+        "Порча имущества",
+        "Обслуживание ВС при неблагоприятных МУ",
+    ]),
+    ("Назначение и выполнение задач", [
+        "Комплектация багажа",
+        "Доставка багажа из/в ЗО на/с МС",
+    ]),
+    ("Эксплуатация ТС", [
+        "Несоблюдение ПДД",
+        "Световое обозначение транспорта",
+        "Обеспечение остановки и стоянки ТС",
+        "ДТП",
+        "Движение без регулировщика",
+        "Осмотр ТС",
+        "Чистота ТС",
+        "Отказы и неисправности ТС",
+    ]),
+    ("Трудовая дисциплина и безопасность", [
+        "Техника безопасности охраны труда",
+        "Алкогольное и наркотическое опьянение",
+        "Алкогольное и наркотическое опъянение",
+        "Внутриобъектовый режим",
+        "Нарушение ФО этики",
+        "Нарушение ФО/этики",
+        "Нарушение ФО,этики",
+    ]),
+    ("Доставка клиентов с/до ВС", [
+        "Высадка посадка пассажиров",
+        "Доставка пассажиров автобусами",
+        "Ошибочная высадка пассажиров",
+    ]),
+    ("Обслуживание багажа", [
+        "Комплектация багажа",
+        "Доставка багажа из/в ЗО на/с МС",
+    ]),
+    ("Обслуживание груза/почты", [
+        "Обслуживание груза/почты",
+        "Обслуживание груза почты",
+    ]),
+]
+
+# Normalized lookup: norm_value → group_index (last mapping wins for duplicates)
+_PERRON_CAT_NORM_MAP: dict[str, int] = {}
+for _pcgi, (_pclbl, _pcvals) in enumerate(_PERRON_CAT_GROUPS):
+    for _pcv in _pcvals:
+        _PERRON_CAT_NORM_MAP[_norm_cat(_pcv)] = _pcgi
+
+
+def build_perron_categories_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """
+    Table 11: perron violations (Заключение = «с виной») grouped by category.
+    Returns a dict with row_groups for merged-cell rendering:
+      each group = {display_col: val, ..., 'details': [{dept_col: val, count_col: val}, ...]}
+    ДСТ/ССТ/СПТ are merged in the department breakdown.
+    """
+    col_cat = "Категория"
+    col_total = "Кол-во нарушений"
+    col_dept = "Служба"
+    col_dept_cnt = "Кол-во нарушений (служба)"
+    columns = [col_cat, col_total, col_dept, col_dept_cnt]
+
+    if df_perron is None:
+        return {
+            "columns": columns,
+            "rows": [],
+            "message": NOT_UPLOADED,
+        }
+
+    in_perron = df_perron[
+        (df_perron["date"] >= start)
+        & (df_perron["date"] <= end)
+        & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
+    ].copy()
+
+    # Merge ДСТ/ССТ/СПТ in dept column
+    in_perron["department"] = in_perron["department"].apply(
+        lambda d: "ДСТ" if d in _DST_ALIASES else d
+    )
+
+    # Assign each row to a group
+    in_perron["_group_idx"] = in_perron["category"].apply(
+        lambda c: _PERRON_CAT_NORM_MAP.get(_norm_cat(str(c)))
+    )
+
+    row_groups = []
+    for gi, (label, _) in enumerate(_PERRON_CAT_GROUPS):
+        grp = in_perron[in_perron["_group_idx"] == gi]
+        total = len(grp)
+        dept_counts = (
+            grp["department"]
+            .replace("nan", pd.NA)
+            .dropna()
+            .value_counts()
+            .sort_values(ascending=False)
+        )
+        details = [
+            {col_dept: dept, col_dept_cnt: int(cnt)}
+            for dept, cnt in dept_counts.items()
+        ]
+        row_groups.append({
+            col_cat: label,
+            col_total: total,
+            "details": details,
+        })
+
+    return {
+        "columns": columns,
+        "rows": [],
+        "span_columns": 2,
+        "row_groups": row_groups,
+    }
+
+
 def _not_uploaded_table(tid: str, title: str, columns: list[str]) -> dict:
     return {
         "id": tid,
@@ -1048,9 +1196,17 @@ def build_month_tables(
             "perron_departments", "10. Количество нарушений на перроне", perron_dept_cols
         )
 
+    # Table 11: perron category distribution with dept breakdown
+    perron_cat_data = build_perron_categories_table(df_perron, start, end)
+    perron_cat_table: dict = {
+        "id": "perron_categories",
+        "title": "11. Распределение нарушений на перроне",
+        **perron_cat_data,
+    }
+
     return [
         production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
         *subcat_tables,
         employees_table, repeat_table,
-        perron_dept_table,
+        perron_dept_table, perron_cat_table,
     ]

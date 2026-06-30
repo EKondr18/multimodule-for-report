@@ -2,12 +2,19 @@ import { apiUrl, parseErrorOrJson } from "./base";
 
 export type Granularity = "week" | "month" | "quarter" | "year";
 
+export interface RowGroup {
+  details: Record<string, string | number>[];
+  [key: string]: string | number | Record<string, string | number>[];
+}
+
 export interface SummaryTable {
   id: string;
   title: string;
   columns: string[];
   rows: Record<string, string | number>[];
   message?: string;
+  span_columns?: number;
+  row_groups?: RowGroup[];
 }
 
 interface SummaryResponse {
