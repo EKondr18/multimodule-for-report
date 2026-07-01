@@ -8,6 +8,10 @@ export default function App() {
   return (
     <div className="app-shell">
       <nav className="tab-nav">
+        <div className="tab-nav-header">
+          <div className="tab-nav-logo">RMS</div>
+          <div className="tab-nav-subtitle">Reporting Suite</div>
+        </div>
         {TABS.map((tab) => (
           <button
             key={tab.id}

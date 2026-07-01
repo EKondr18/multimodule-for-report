@@ -89,11 +89,11 @@ export default function SummaryTable({ table }: Props) {
   };
 
   return (
-    <div style={{ marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-        <h4 style={{ margin: 0 }}>{table.title}</h4>
-        <button className="btn" onClick={handleCopy}>
-          {copied ? "Скопировано" : "Копировать"}
+    <div style={{ marginBottom: 28 }}>
+      <div className="summary-table-header">
+        <span className="summary-table-title">{table.title}</span>
+        <button className="btn btn-sm" onClick={handleCopy}>
+          {copied ? "✓ Скопировано" : "Копировать"}
         </button>
       </div>
       <table className="preview">
