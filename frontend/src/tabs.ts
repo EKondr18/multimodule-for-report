@@ -1,6 +1,7 @@
 import { ComponentType } from "react";
 import BaggageCommentsPage from "./pages/BaggageCommentsPage";
 import BaggageNormPage from "./pages/BaggageNormPage";
+import MonthQuarterPage from "./pages/MonthQuarterPage";
 import QualityReportPage from "./pages/QualityReportPage";
 
 export interface TabDefinition {
@@ -14,4 +15,5 @@ export const TABS: TabDefinition[] = [
   { id: "baggage-norm", label: "Норматив выдачи багажа", Component: BaggageNormPage },
   { id: "baggage-comments", label: "Добавление комментариев по багажу", Component: BaggageCommentsPage },
   { id: "quality-report", label: "Отчёт по качеству", Component: QualityReportPage },
+  { id: "month-quarter", label: "Месяц/Квартал", Component: MonthQuarterPage },
 ];
