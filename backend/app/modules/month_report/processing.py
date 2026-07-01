@@ -990,6 +990,44 @@ _ETS_CATEGORIES = [
     "Отказы и неисправности ТС",
 ]
 
+# Table 14: parent categories (file values) to filter on
+_TDB_PARENT_CATS_FILE = [
+    "Техника безопасности охраны труда",
+    "Техника безопасности, охраны труда",
+    "Алкогольное и наркотическое опьянение",
+    "Алкогольное и наркотическое опъянение",
+    "Внутриобъектовый режим",
+    "Нарушение ФО этики",
+    "Нарушение ФО, этики",
+    "Нарушение ФО/этики",
+    "Нарушения ФО этики",
+    "Нарушения ФО, этики",
+    "Нарушения ФО/этики",
+]
+
+# Table 14: subcategory groups — order defines row order; None = catch-all «Другое»
+_TDB_SUBCAT_GROUPS: list[tuple[str, list[str] | None]] = [
+    ("Соблюдение СИЗ",                                       ["Соблюдение СИЗ"]),
+    ("Алкогольное опьянение",                                ["Алкогольное опьянение", "Алкогольное опъянение"]),
+    ("Отсутствие пропуска на видном месте",                  ["Отсутствие пропуска на видном месте"]),
+    ("Другое",                                               None),
+    ("Прохождение МО",                                       ["Прохождение МО"]),
+    ("Нарушение ФО",                                         ["Нарушение ФО"]),
+    ("Порча имущества компании",                             ["Порча имущества компании"]),
+    ("Использование личного МТ",                             ["Использование личного МТ"]),
+    ("Хождение по транспортерной ленте",                     ["Хождение по транспортерной ленте"]),
+    ("Передвижение пешком по маршруту движения ТС/перрону",  [
+        "Передвижение пешком по маршруту движения ТС/перрону",
+        "Передвижение пешком по маршруту движения ТС перрону",
+    ]),
+    ("Выход на перрон без жилета",                           ["Выход на перрон без жилета"]),
+    ("Выполнение работ без стремянки",                       ["Выполнение работ без стремянки"]),
+    ("Использование средств подмащивания",                   ["Использование средств подмащивания"]),
+    ("Выполнение работ в наушниках",                         ["Выполнение работ в наушниках"]),
+    ("Несоблюдение этики общения",                           ["Несоблюдение этики общения"]),
+    ("Наркотическое опьянение",                              ["Наркотическое опьянение", "Наркотическое опъянение"]),
+]
+
 
 def _filter_perron_cats(
     df: pd.DataFrame,
@@ -1168,6 +1206,72 @@ def build_ets_table(
         col_cat: "ИТОГО",
         col_cnt: grand_total,
         "details": [{col_dept: d, col_dc: c, col_sub: "", col_sdepts: ""} for d, c in itogo_depts],
+    })
+    return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
+
+
+def build_tdb_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 14: Трудовая дисциплина и безопасность — subcategories + dept breakdown."""
+    col_sub = "Подкатегория"
+    col_cnt = "Кол-во нарушений"
+    col_dept = "Служба"
+    col_dc = "Кол-во нарушений (служба)"
+    columns = [col_sub, col_cnt, col_dept, col_dc]
+
+    if df_perron is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    sub = _filter_perron_cats(df_perron, start, end, _TDB_PARENT_CATS_FILE)
+
+    norm_map: dict[str, int] = {}
+    catchall_idx: int | None = None
+    for gi, (_, vals) in enumerate(_TDB_SUBCAT_GROUPS):
+        if vals is None:
+            catchall_idx = gi
+        else:
+            for v in vals:
+                norm_map[_norm_subcat(v)] = gi
+
+    counts = [0] * len(_TDB_SUBCAT_GROUPS)
+    dept_per_group: list[dict[str, int]] = [{} for _ in _TDB_SUBCAT_GROUPS]
+
+    sub_merged = _merge_dst(sub)
+    for _, row in sub_merged.iterrows():
+        raw_sub = str(row.get("subcategory", ""))
+        dept = str(row.get("department", ""))
+        gi = norm_map.get(_norm_subcat(raw_sub))
+        if gi is None:
+            gi = catchall_idx
+        if gi is not None:
+            counts[gi] += 1
+            if dept not in ("nan", ""):
+                dept_per_group[gi][dept] = dept_per_group[gi].get(dept, 0) + 1
+
+    row_groups = []
+    grand_total = 0
+    all_depts: dict[str, int] = {}
+
+    for gi, (label, _) in enumerate(_TDB_SUBCAT_GROUPS):
+        c = counts[gi]
+        grand_total += c
+        depts = sorted(dept_per_group[gi].items(), key=lambda x: -x[1])
+        for d, dc in depts:
+            all_depts[d] = all_depts.get(d, 0) + dc
+        row_groups.append({
+            col_sub: label,
+            col_cnt: c,
+            "details": [{col_dept: d, col_dc: dc} for d, dc in depts],
+        })
+
+    itogo_depts = sorted(all_depts.items(), key=lambda x: -x[1])
+    row_groups.append({
+        col_sub: "ИТОГО",
+        col_cnt: grand_total,
+        "details": [{col_dept: d, col_dc: c} for d, c in itogo_depts],
     })
     return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
 
@@ -1424,6 +1528,7 @@ def build_month_tables(
         **perron_cat_data,
     }
 
+    _tdb_cols = ["Подкатегория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)"]
     if df_perron is not None:
         avs: dict = {"id": "avs_breakdown", "title": "11. Обслуживание ВС",
                      **build_avs_table(df_perron, start, end)}
@@ -1431,6 +1536,8 @@ def build_month_tables(
                      **build_nvz_table(df_perron, start, end)}
         ets: dict = {"id": "ets_breakdown", "title": "13. Эксплуатация ТС",
                      **build_ets_table(df_perron, start, end)}
+        tdb: dict = {"id": "tdb_breakdown", "title": "14. Трудовая дисциплина и безопасность",
+                     **build_tdb_table(df_perron, start, end)}
     else:
         avs = _not_uploaded_table("avs_breakdown", "11. Обслуживание ВС",
                                   ["Категория", "Кол-во нарушений"])
@@ -1439,11 +1546,12 @@ def build_month_tables(
         ets = _not_uploaded_table("ets_breakdown", "13. Эксплуатация ТС",
                                   ["Категория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)",
                                    "Типовые нарушения", "Кол-во по службам"])
+        tdb = _not_uploaded_table("tdb_breakdown", "14. Трудовая дисциплина и безопасность", _tdb_cols)
 
     return [
         production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
         *subcat_tables,
         employees_table, repeat_table,
         perron_dept_table, perron_cat_table,
-        avs, nvz, ets,
+        avs, nvz, ets, tdb,
     ]
