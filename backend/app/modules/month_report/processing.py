@@ -214,7 +214,8 @@ def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
 def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
     """
     Read appeals file (Обращения) and return DataFrame with
-    [date, result, appeal_type, responsible_services].
+    [date, result, appeal_type, status, requestor, requestor_detail,
+     claimed_amount, accepted_amount, responsible_services].
     responsible_services is a frozenset of stripped service names per row.
     """
     df = pd.read_excel(file_obj, sheet_name=APPEALS_SHEET)
@@ -224,6 +225,17 @@ def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
     result_c = _find_col(cols, "результат")
     type_c = _find_col(cols, "тип обращени")
     resp_c = _find_col(cols, "ответственные службы")
+    status_c = _find_col(cols, "статус")
+    # "Заявитель" (without пояснение) for UTG filter
+    requestor_c = next(
+        (c for c in cols if isinstance(c, str)
+         and "заявитель" in c.strip().lower()
+         and "пояснение" not in c.strip().lower()),
+        None,
+    )
+    requestor_detail_c = _find_col(cols, "пояснение")
+    claimed_c = _find_col(cols, "заявленная")
+    accepted_c = _find_col(cols, "принятая")
 
     if date_c is None or result_c is None:
         raise ValueError(
@@ -232,22 +244,37 @@ def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
 
     keep = [date_c, result_c]
     rename = {date_c: "date", result_c: "result"}
-    if type_c is not None:
-        keep.append(type_c)
-        rename[type_c] = "appeal_type"
-    if resp_c is not None:
-        keep.append(resp_c)
-        rename[resp_c] = "responsible_services_raw"
+    for col, name in [
+        (type_c, "appeal_type"),
+        (status_c, "status"),
+        (requestor_c, "requestor"),
+        (requestor_detail_c, "requestor_detail"),
+        (claimed_c, "claimed_amount_raw"),
+        (accepted_c, "accepted_amount_raw"),
+        (resp_c, "responsible_services_raw"),
+    ]:
+        if col is not None:
+            keep.append(col)
+            rename[col] = name
 
     out = df[keep].rename(columns=rename)
     out["date"] = pd.to_datetime(out["date"], errors="coerce", dayfirst=True)
     out = out.dropna(subset=["date"]).reset_index(drop=True)
     out["result"] = out["result"].astype(str).str.strip()
 
-    if "appeal_type" in out.columns:
-        out["appeal_type"] = out["appeal_type"].astype(str).str.strip()
-    else:
-        out["appeal_type"] = ""
+    for str_col in ("appeal_type", "status", "requestor", "requestor_detail"):
+        if str_col in out.columns:
+            out[str_col] = out[str_col].astype(str).str.strip()
+        else:
+            out[str_col] = ""
+
+    for amt_col, out_col in [("claimed_amount_raw", "claimed_amount"),
+                              ("accepted_amount_raw", "accepted_amount")]:
+        if amt_col in out.columns:
+            out[out_col] = pd.to_numeric(out[amt_col], errors="coerce").fillna(0)
+            out = out.drop(columns=[amt_col])
+        else:
+            out[out_col] = 0.0
 
     def _parse_services(val: object) -> frozenset:
         if not isinstance(val, str) or not val.strip():
@@ -1516,6 +1543,129 @@ def build_perron_categories_table(
     }
 
 
+# ---------------------------------------------------------------------------
+# Tables 18, 19, 20 — appeals breakdown
+# ---------------------------------------------------------------------------
+
+CANCELLED_STATUS = "Отменено"
+UTG_REQUESTOR = "UTG"
+
+_APPEAL_TYPE_GROUPS = [
+    "Жалоба",
+    "Запрос информации",
+    "Претензия",
+    "Благодарность",
+    "Информационное письмо",
+    "SLA",
+    "Другое",
+    "Исходящее",
+    "Предписание",
+]
+
+_REQUESTOR_GROUPS: list[tuple[str, list[str]]] = [
+    ("ЮТэйр",              ["ЮТэйр"]),
+    ("QR",                 ["QR"]),
+    ("Победа",             ["Победа"]),
+    ("Россия",             ["Россия"]),
+    ("Обратная связь",     ["Обратная связь"]),
+    ("Uzbekistan Airways", ["Uzbekistan Airways"]),
+    ("Азимут",             ["Азимут"]),
+]
+
+# Pre-build normalized requestor lookup
+_REQUESTOR_NORM_MAP: dict[str, int] = {}
+for _rgi, (_rlbl, _rvals) in enumerate(_REQUESTOR_GROUPS):
+    for _rv in _rvals:
+        _REQUESTOR_NORM_MAP[_norm_subcat(_rv)] = _rgi
+
+
+def build_appeals_type_table(
+    df_appeals: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 18: count by appeal type; filter Статус≠Отменено, Заявитель≠UTG."""
+    col_type, col_cnt = "Тип обращения", "Кол-во"
+    columns = [col_type, col_cnt]
+    if df_appeals is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    mask = (
+        (df_appeals["date"] >= start)
+        & (df_appeals["date"] <= end)
+        & (df_appeals["status"] != CANCELLED_STATUS)
+        & (df_appeals["requestor"] != UTG_REQUESTOR)
+    )
+    in_period = df_appeals[mask]
+
+    norm_types = in_period["appeal_type"].apply(_norm_subcat)
+    rows = [
+        {col_type: t, col_cnt: int((norm_types == _norm_subcat(t)).sum())}
+        for t in _APPEAL_TYPE_GROUPS
+    ]
+    return {"columns": columns, "rows": rows}
+
+
+def build_requestors_table(
+    df_appeals: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 19: count by requestor_detail (пояснение); filter like table 2 no-thanks + Статус≠Отменено."""
+    col_req, col_cnt = "Заявитель", "Кол-во"
+    columns = [col_req, col_cnt]
+    if df_appeals is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    mask = (
+        (df_appeals["date"] >= start)
+        & (df_appeals["date"] <= end)
+        & (~df_appeals["appeal_type"].isin(EXCLUDED_APPEAL_TYPES))
+        & (df_appeals["status"] != CANCELLED_STATUS)
+    )
+    in_period = df_appeals[mask]
+
+    counts = [0] * len(_REQUESTOR_GROUPS)
+    for raw in in_period["requestor_detail"]:
+        gi = _REQUESTOR_NORM_MAP.get(_norm_subcat(str(raw)))
+        if gi is not None:
+            counts[gi] += 1
+
+    rows = [
+        {col_req: label, col_cnt: counts[gi]}
+        for gi, (label, _) in enumerate(_REQUESTOR_GROUPS)
+    ]
+    return {"columns": columns, "rows": rows}
+
+
+def build_claims_table(
+    df_appeals: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 20: sum of Заявленная сумма and Принятая сумма for Претензия rows."""
+    col_claimed, col_accepted = "Заявленная сумма", "Принятая сумма"
+    columns = [col_claimed, col_accepted]
+    if df_appeals is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    in_period = df_appeals[
+        (df_appeals["date"] >= start)
+        & (df_appeals["date"] <= end)
+        & (df_appeals["appeal_type"] == "Претензия")
+        & (df_appeals["status"] != CANCELLED_STATUS)
+    ]
+
+    claimed = float(in_period["claimed_amount"].sum())
+    accepted = float(in_period["accepted_amount"].sum())
+
+    def _fmt(v: float) -> int | float:
+        return int(v) if v == int(v) else v
+
+    rows = [{col_claimed: _fmt(claimed), col_accepted: _fmt(accepted)}]
+    return {"columns": columns, "rows": rows}
+
+
 def _not_uploaded_table(tid: str, title: str, columns: list[str]) -> dict:
     return {
         "id": tid,
@@ -1692,6 +1842,27 @@ def build_month_tables(
                                                   "17.1 Повторяющиеся сотрудники перрон",
                                                   _perron_repeat_cols)
 
+    _appeals_cnt_cols = ["Тип обращения", "Кол-во"]
+    _requestors_cols = ["Заявитель", "Кол-во"]
+    _claims_cols = ["Заявленная сумма", "Принятая сумма"]
+    if df_appeals is not None:
+        appeals_type_table: dict = {
+            "id": "appeals_type", "title": "18. Тип обращения",
+            **build_appeals_type_table(df_appeals, start, end),
+        }
+        requestors_table: dict = {
+            "id": "requestors", "title": "19. Заявители",
+            **build_requestors_table(df_appeals, start, end),
+        }
+        claims_table: dict = {
+            "id": "claims", "title": "20. Претензии",
+            **build_claims_table(df_appeals, start, end),
+        }
+    else:
+        appeals_type_table = _not_uploaded_table("appeals_type", "18. Тип обращения", _appeals_cnt_cols)
+        requestors_table = _not_uploaded_table("requestors", "19. Заявители", _requestors_cols)
+        claims_table = _not_uploaded_table("claims", "20. Претензии", _claims_cols)
+
     return [
         production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
         *subcat_tables,
@@ -1699,4 +1870,5 @@ def build_month_tables(
         perron_dept_table, perron_cat_table,
         avs, nvz, ets, tdb, dkv, ob,
         perron_emp_table, perron_repeat_table,
+        appeals_type_table, requestors_table, claims_table,
     ]
