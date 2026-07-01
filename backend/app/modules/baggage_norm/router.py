@@ -1,18 +1,8 @@
 from datetime import date
 from io import BytesIO, StringIO
 
-import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
-
-from app.core import github_storage
-from app.modules.baggage_norm.processing import (
-    DATALENS_COLUMNS,
-    derive_datalens,
-    empty_master,
-    merge_with_master,
-    read_weekly_excel,
-)
 
 router = APIRouter(prefix="/api/baggage-norm", tags=["baggage-norm"])
 
@@ -20,7 +10,11 @@ MASTER_PATH = "data/baggage_norm/master.csv"
 DATALENS_PATH = "data/baggage_norm/datalens.csv"
 
 
-def _load_master() -> tuple[pd.DataFrame, str | None]:
+def _load_master():
+    import pandas as pd
+    from app.core import github_storage
+    from app.modules.baggage_norm.processing import empty_master
+
     content, sha = github_storage.read_file(MASTER_PATH)
     if content is None:
         return empty_master(), None
@@ -30,21 +24,26 @@ def _load_master() -> tuple[pd.DataFrame, str | None]:
     return df, sha
 
 
-def _load_datalens() -> tuple[pd.DataFrame, str | None]:
+def _load_datalens():
+    import pandas as pd
+    from app.core import github_storage
+    from app.modules.baggage_norm.processing import DATALENS_COLUMNS
+
     content, sha = github_storage.read_file(DATALENS_PATH)
     if content is None:
         return pd.DataFrame(columns=DATALENS_COLUMNS), None
     return pd.read_csv(StringIO(content)), sha
 
 
-def _rows(datalens: pd.DataFrame) -> list[dict]:
+def _rows(datalens) -> list[dict]:
     return datalens.to_dict(orient="records")
 
 
-def _append_to_datalens(df_new: pd.DataFrame, message: str) -> pd.DataFrame:
-    """Дописывает производные строки новой загрузки в общий накопительный
-    datalens.csv (не пересчитывает его из master.csv — иначе была бы потеряна
-    история, заведённая до появления приложения)."""
+def _append_to_datalens(df_new, message: str):
+    import pandas as pd
+    from app.core import github_storage
+    from app.modules.baggage_norm.processing import derive_datalens
+
     new_rows = derive_datalens(df_new).copy()
     new_rows["date"] = new_rows["date"].dt.strftime("%Y-%m-%d")
 
@@ -64,6 +63,9 @@ def get_current():
 
 @router.post("/process")
 async def process_weekly_file(file: UploadFile):
+    from app.core import github_storage
+    from app.modules.baggage_norm.processing import merge_with_master, read_weekly_excel
+
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Ожидается файл Excel (.xlsx/.xls)")
 
@@ -89,6 +91,10 @@ async def process_weekly_file(file: UploadFile):
 
 @router.get("/download")
 def download_datalens_csv(start_date: str | None = None, end_date: str | None = None):
+    import pandas as pd
+    from app.core import github_storage
+    from app.modules.baggage_norm.processing import derive_datalens
+
     content, _ = github_storage.read_file(DATALENS_PATH)
     if content is None:
         df_master, _ = _load_master()

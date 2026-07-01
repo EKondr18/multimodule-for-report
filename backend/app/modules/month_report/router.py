@@ -1,15 +1,6 @@
 from io import BytesIO
 
-import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-
-from app.modules.month_report.processing import (
-    build_month_tables,
-    read_appeals_file,
-    read_avk_full,
-    read_perron_full,
-    read_production_file,
-)
 
 router = APIRouter(prefix="/api/month-report", tags=["month-report"])
 
@@ -32,6 +23,15 @@ async def month_summary(
     end_date: str = Form(...),
     granularity: str = Form("month"),
 ):
+    import pandas as pd
+    from app.modules.month_report.processing import (
+        build_month_tables,
+        read_appeals_file,
+        read_avk_full,
+        read_perron_full,
+        read_production_file,
+    )
+
     if granularity not in ALLOWED_GRANULARITIES:
         raise HTTPException(400, f"Неизвестный временной срез: {granularity}")
 

@@ -1,22 +1,6 @@
 from io import BytesIO
 
-import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-
-from app.modules.quality_report.processing import (
-    FO_SIZ_CHECKS_SHEET,
-    GRANULARITIES,
-    PAB_BAGGAGE_SHEET,
-    PAB_FO_ETHICS_SHEET,
-    PAB_PT_SHEET,
-    PAB_RK_SHEET,
-    RPO_CHECKS_SHEET,
-    build_quality_tables,
-    read_grh_checks_sheet,
-    read_lir_szv_file,
-    read_pab_checks_sheet,
-    read_violations_file,
-)
 
 router = APIRouter(prefix="/api/quality-report", tags=["quality-report"])
 
@@ -37,6 +21,22 @@ async def quality_summary(
     end_date: str = Form(...),
     granularity: str = Form(...),
 ):
+    import pandas as pd
+    from app.modules.quality_report.processing import (
+        FO_SIZ_CHECKS_SHEET,
+        GRANULARITIES,
+        PAB_BAGGAGE_SHEET,
+        PAB_FO_ETHICS_SHEET,
+        PAB_PT_SHEET,
+        PAB_RK_SHEET,
+        RPO_CHECKS_SHEET,
+        build_quality_tables,
+        read_grh_checks_sheet,
+        read_lir_szv_file,
+        read_pab_checks_sheet,
+        read_violations_file,
+    )
+
     if granularity not in GRANULARITIES:
         raise HTTPException(400, f"Неизвестный временной срез: {granularity}")
 

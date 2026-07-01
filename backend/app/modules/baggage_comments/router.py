@@ -3,16 +3,6 @@ from io import BytesIO
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
-from app.modules.baggage_comments.processing import (
-    TBS_OUTPUT_COLUMNS,
-    merge_comments,
-    merge_tbs,
-    read_events_file,
-    read_norm_file,
-    read_tbs_events_file,
-    read_tbs_flights_file,
-)
-
 router = APIRouter(prefix="/api/baggage-comments", tags=["baggage-comments"])
 
 SUPPORTED_STATIONS = {"vko", "tbs"}
@@ -30,6 +20,16 @@ async def process_files(
     events_file: UploadFile,
     station: str = Form("vko"),
 ):
+    from app.modules.baggage_comments.processing import (
+        TBS_OUTPUT_COLUMNS,
+        merge_comments,
+        merge_tbs,
+        read_events_file,
+        read_norm_file,
+        read_tbs_events_file,
+        read_tbs_flights_file,
+    )
+
     if station not in SUPPORTED_STATIONS:
         raise HTTPException(400, f"Обработка для станции {station.upper()} ещё не реализована")
 
