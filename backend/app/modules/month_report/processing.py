@@ -268,10 +268,22 @@ def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
         else:
             out[str_col] = ""
 
+    def _parse_amount(val: object) -> float:
+        if pd.isna(val) if not isinstance(val, str) else not str(val).strip():
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip().replace("\xa0", "").replace(" ", "")
+        s = s.replace(",", ".")
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
     for amt_col, out_col in [("claimed_amount_raw", "claimed_amount"),
                               ("accepted_amount_raw", "accepted_amount")]:
         if amt_col in out.columns:
-            out[out_col] = pd.to_numeric(out[amt_col], errors="coerce").fillna(0)
+            out[out_col] = out[amt_col].apply(_parse_amount)
             out = out.drop(columns=[amt_col])
         else:
             out[out_col] = 0.0
@@ -1656,13 +1668,10 @@ def build_claims_table(
         & (df_appeals["status"] != CANCELLED_STATUS)
     ]
 
-    claimed = float(in_period["claimed_amount"].sum())
-    accepted = float(in_period["accepted_amount"].sum())
+    claimed = round(float(in_period["claimed_amount"].sum()), 2)
+    accepted = round(float(in_period["accepted_amount"].sum()), 2)
 
-    def _fmt(v: float) -> int | float:
-        return int(v) if v == int(v) else v
-
-    rows = [{col_claimed: _fmt(claimed), col_accepted: _fmt(accepted)}]
+    rows = [{col_claimed: claimed, col_accepted: accepted}]
     return {"columns": columns, "rows": rows}
 
 
