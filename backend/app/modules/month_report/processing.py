@@ -269,12 +269,33 @@ def read_appeals_file(file_obj: BinaryIO) -> pd.DataFrame:
             out[str_col] = ""
 
     def _parse_amount(val: object) -> float:
-        if pd.isna(val) if not isinstance(val, str) else not str(val).strip():
+        if val is None:
             return 0.0
-        if isinstance(val, (int, float)):
-            return float(val)
-        s = str(val).strip().replace("\xa0", "").replace(" ", "")
-        s = s.replace(",", ".")
+        try:
+            if pd.isna(val):
+                return 0.0
+        except (TypeError, ValueError):
+            pass
+        # Handles numpy.int64, numpy.float64, Python int/float
+        if not isinstance(val, str):
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return 0.0
+        s = val.strip()
+        if not s or s.lower() in ("nan", "none"):
+            return 0.0
+        import re as _re
+        # Remove all whitespace variants (regular, nbsp \xa0, thin nbsp  , etc.)
+        s = _re.sub(r"[\s   ​]+", "", s)
+        # "1.234,56" → "1234.56";  "1,234.56" → "1234.56";  "44853,97" → "44853.97"
+        if "," in s and "." in s:
+            if s.rfind(",") > s.rfind("."):  # comma is decimal sep
+                s = s.replace(".", "").replace(",", ".")
+            else:                            # dot is decimal sep
+                s = s.replace(",", "")
+        elif "," in s:
+            s = s.replace(",", ".")
         try:
             return float(s)
         except ValueError:
@@ -1655,7 +1676,7 @@ def build_claims_table(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> dict:
-    """Table 20: sum of Заявленная сумма and Принятая сумма for Претензия rows."""
+    """Table 20: sum of Заявленная сумма and Принятая сумма (all rows in period)."""
     col_claimed, col_accepted = "Заявленная сумма", "Принятая сумма"
     columns = [col_claimed, col_accepted]
     if df_appeals is None:
@@ -1664,7 +1685,6 @@ def build_claims_table(
     in_period = df_appeals[
         (df_appeals["date"] >= start)
         & (df_appeals["date"] <= end)
-        & (df_appeals["appeal_type"] == "Претензия")
         & (df_appeals["status"] != CANCELLED_STATUS)
     ]
 
