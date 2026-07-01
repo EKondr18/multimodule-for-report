@@ -850,7 +850,7 @@ def build_avk_employees_table(
     sorted desc, with counts for the two preceding calendar months.
     Returns (rows, columns).
     """
-    columns = ["Сотрудник", _COL_2M, _COL_1M, _COL_CUR]
+    columns = ["Сотрудник", "Подразделение", _COL_2M, _COL_1M, _COL_CUR]
     if df_avk is None:
         return [], columns
 
@@ -885,6 +885,16 @@ def build_avk_employees_table(
     p1_cnt = canonical_counts(p1_df)
     p2_cnt = canonical_counts(p2_df)
 
+    # Most frequent department per canonical employee in current period
+    cur_mapped = cur_df.copy()
+    cur_mapped["canonical"] = (
+        cur_mapped["executor"].replace("nan", pd.NA).map(lambda n: name_map.get(n, n))
+    )
+    dept_lookup: dict[str, str] = {}
+    for canon, grp in cur_mapped.dropna(subset=["canonical"]).groupby("canonical"):
+        dept_counts = grp["department"].replace("nan", pd.NA).dropna().value_counts()
+        dept_lookup[str(canon)] = str(dept_counts.index[0]) if not dept_counts.empty else ""
+
     eligible = sorted(
         [(name, c) for name, c in cur_cnt.items() if c >= _MIN_VIOLATIONS],
         key=lambda x: -x[1],
@@ -893,6 +903,7 @@ def build_avk_employees_table(
     rows = [
         {
             "Сотрудник": name,
+            "Подразделение": dept_lookup.get(name, ""),
             _COL_2M: p2_cnt.get(name, 0),
             _COL_1M: p1_cnt.get(name, 0),
             _COL_CUR: cur_c,
@@ -1591,7 +1602,7 @@ def build_month_tables(
             subcat_tables.append(_not_uploaded_table(tid, title, subcat_cols))
 
     # Table 9: employees
-    emp_cols_default = ["Сотрудник", _COL_2M, _COL_1M, _COL_CUR]
+    emp_cols_default = ["Сотрудник", "Подразделение", _COL_2M, _COL_1M, _COL_CUR]
     if df_avk is not None:
         emp_rows, emp_cols = build_avk_employees_table(df_avk, start, end)
         employees_table: dict = {
@@ -1639,7 +1650,7 @@ def build_month_tables(
 
     _flat_sub_cols = ["Подкатегория", "Кол-во нарушений"]
     _tdb_cols = ["Подкатегория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)"]
-    _perron_emp_cols_default = ["Сотрудник", _COL_2M, _COL_1M, _COL_CUR]
+    _perron_emp_cols_default = ["Сотрудник", "Подразделение", _COL_2M, _COL_1M, _COL_CUR]
     _perron_repeat_cols = ["Подразделение/Сотрудник", "Подкатегория нарушения", "Кол-во нарушений"]
     if df_perron is not None:
         avs: dict = {"id": "avs_breakdown", "title": "11. Обслуживание ВС",
