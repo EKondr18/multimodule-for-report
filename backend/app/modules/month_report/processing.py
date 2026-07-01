@@ -936,7 +936,7 @@ def build_avk_employees_table(
 
     eligible = sorted(
         [(name, c) for name, c in cur_cnt.items() if c >= _MIN_VIOLATIONS],
-        key=lambda x: -x[1],
+        key=lambda x: (dept_lookup.get(x[0], ""), -x[1]),
     )
 
     rows = [
