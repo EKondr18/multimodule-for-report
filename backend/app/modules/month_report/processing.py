@@ -109,6 +109,7 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     dept_c = _find_col(cols, "подразделен")
     cat_c = _find_col(cols, "категори")
     subcat_c = _find_col(cols, "подкатегори") or _find_col(cols, "типов")
+    exec_c = _find_col(cols, "исполнител")
 
     if date_c is None or conclusion_c is None:
         raise ValueError(
@@ -134,12 +135,15 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     if subcat_c is not None:
         keep.append(subcat_c)
         rename[subcat_c] = "subcategory"
+    if exec_c is not None:
+        keep.append(exec_c)
+        rename[exec_c] = "executor"
 
     result = raw[keep].rename(columns=rename)
     result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
     result = result.dropna(subset=["date"]).reset_index(drop=True)
     result["conclusion"] = result["conclusion"].astype(str).str.strip()
-    for col in ("department", "category", "subcategory"):
+    for col in ("department", "category", "subcategory", "executor"):
         if col in result.columns:
             result[col] = result[col].astype(str).str.strip()
         else:
@@ -616,7 +620,6 @@ def build_avk_categories_table(
         total += c
         rows.append({"Категория": label, "Кол-во нарушений": c})
 
-    rows.append({"Категория": "ИТОГО", "Кол-во нарушений": total})
     return rows
 
 
@@ -769,7 +772,6 @@ def build_avk_subcategory_table(
         total += c
         rows.append({"Подкатегория": label, "Кол-во нарушений": c})
 
-    rows.append({"Подкатегория": "ИТОГО", "Кол-во нарушений": total})
     return rows
 
 
@@ -1097,7 +1099,6 @@ def build_avs_table(
         c = counts[gi]
         total += c
         rows.append({col_cat: label, col_cnt: c})
-    rows.append({col_cat: "ИТОГО", col_cnt: total})
     return {"columns": columns, "rows": rows}
 
 
@@ -1132,13 +1133,6 @@ def build_nvz_table(
             "details": [{col_dept: d, col_dc: c} for d, c in depts.items()],
         })
 
-    # ИТОГО row group
-    itogo_depts = sorted(all_depts.items(), key=lambda x: -x[1])
-    row_groups.append({
-        col_cat: "ИТОГО",
-        col_cnt: grand_total,
-        "details": [{col_dept: d, col_dc: c} for d, c in itogo_depts],
-    })
     return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
 
 
@@ -1201,12 +1195,6 @@ def build_ets_table(
             "details": dept_rows + subcat_rows,
         })
 
-    itogo_depts = sorted(all_depts.items(), key=lambda x: -x[1])
-    row_groups.append({
-        col_cat: "ИТОГО",
-        col_cnt: grand_total,
-        "details": [{col_dept: d, col_dc: c, col_sub: "", col_sdepts: ""} for d, c in itogo_depts],
-    })
     return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
 
 
@@ -1267,13 +1255,134 @@ def build_tdb_table(
             "details": [{col_dept: d, col_dc: dc} for d, dc in depts],
         })
 
-    itogo_depts = sorted(all_depts.items(), key=lambda x: -x[1])
-    row_groups.append({
-        col_sub: "ИТОГО",
-        col_cnt: grand_total,
-        "details": [{col_dept: d, col_dc: c} for d, c in itogo_depts],
-    })
     return {"columns": columns, "rows": [], "span_columns": 2, "row_groups": row_groups}
+
+
+# ---------------------------------------------------------------------------
+# Tables 15, 16: flat subcategory breakdown (no dept split) — generic helper
+# ---------------------------------------------------------------------------
+
+def _build_flat_subcat_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    parent_cats: list[str],
+    subcat_groups: list[tuple[str, list[str] | None]],
+) -> dict:
+    """Flat Подкатегория | Кол-во нарушений table filtered by parent categories."""
+    col_sub, col_cnt = "Подкатегория", "Кол-во нарушений"
+    columns = [col_sub, col_cnt]
+    if df_perron is None:
+        return {"columns": columns, "rows": [], "message": NOT_UPLOADED}
+
+    sub = _filter_perron_cats(df_perron, start, end, parent_cats)
+
+    norm_map: dict[str, int] = {}
+    catchall_idx: int | None = None
+    for gi, (_, vals) in enumerate(subcat_groups):
+        if vals is None:
+            catchall_idx = gi
+        else:
+            for v in vals:
+                norm_map[_norm_subcat(v)] = gi
+
+    counts = [0] * len(subcat_groups)
+    for raw_sub in sub["subcategory"]:
+        gi = norm_map.get(_norm_subcat(str(raw_sub)))
+        if gi is None:
+            gi = catchall_idx
+        if gi is not None:
+            counts[gi] += 1
+
+    rows = [{col_sub: label, col_cnt: counts[gi]} for gi, (label, _) in enumerate(subcat_groups)]
+    return {"columns": columns, "rows": rows}
+
+
+_DKV_PARENT_CATS_FILE = [
+    "Высадка посадка пассажиров",
+    "Высадка/посадка пассажиров",
+    "Высадка, посадка пассажиров",
+    "Доставка пассажиров автобусами",
+    "Ошибочная высадка пассажиров",
+]
+
+_DKV_SUBCAT_GROUPS: list[tuple[str, list[str] | None]] = [
+    ("Контроль скоплений пассажиров на трапе",           ["Контроль скоплений пассажиров на трапе",
+                                                           "Контроль скоплении пассажиров на трапе"]),
+    ("Проверка безопасной высадки и посадки пассажиров", ["Проверка безопасной высадки и посадки пассажиров"]),
+    ("Включение информационного табло",                  ["Включение информационного табло"]),
+    ("Запрос на разрешение к высадке пассажиров",        ["Запрос на разрешение к высадке пассажиров"]),
+    ("Соблюдение схемы расположения водителей",          ["Соблюдение схемы расположения водителей"]),
+    ("Контроль за пассажирами",                          ["Контроль за пассажирами"]),
+    ("Доставка пассажиров БК",                           ["Доставка пассажиров БК"]),
+    ("Открытие дверей при неблагоприятных погодных условиях", [
+        "Открытие дверей при неблагоприятных погодных условиях",
+        "Открытие дверей  при неблагоприятных погодных условиях",
+    ]),
+    ("Голосовое оповещение в автобусе",                  ["Голосовое оповещение в автобусе"]),
+]
+
+
+def build_dkv_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 15: Доставка клиентов с/до ВС — subcategory flat breakdown."""
+    return _build_flat_subcat_table(df_perron, start, end, _DKV_PARENT_CATS_FILE, _DKV_SUBCAT_GROUPS)
+
+
+_OB_PARENT_CATS_FILE = [
+    "Комплектация багажа",
+    "Доставка багажа из в ЗО на с МС",
+    "Доставка багажа из/в ЗО на/с МС",
+]
+
+_OB_SUBCAT_GROUPS: list[tuple[str, list[str] | None]] = [
+    ("Повреждение",                                              ["Повреждение"]),
+    ("Загрузка в соответствующее СД",                           ["Загрузка в соответствующее СД"]),
+    ("Корректность загрузки багажа",                            ["Корректность загрузки багажа"]),
+    ("Длительное ожидание выдачи багажа",                       ["Длительное ожидание выдачи багажа"]),
+    ("Вылет пассажира без багажа",                              ["Вылет пассажира без багажа"]),
+    ("Проверка СД",                                             ["Проверка СД"]),
+    ("Приоритетность выгрузки багажа",                          ["Приоритетность выгрузки багажа"]),
+    ("Другое",                                                  None),
+    ("Проверка целостности багажа и средств пакетирования",     [
+        "Проверка целостности багажа и средств пакетирования",
+    ]),
+    ("Недостача",                                               ["Недостача"]),
+]
+
+
+def build_ob_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict:
+    """Table 16: Обслуживание багажа — subcategory flat breakdown."""
+    return _build_flat_subcat_table(df_perron, start, end, _OB_PARENT_CATS_FILE, _OB_SUBCAT_GROUPS)
+
+
+# ---------------------------------------------------------------------------
+# Tables 17, 17.1: perron employee violation tables
+# ---------------------------------------------------------------------------
+
+def build_perron_employees_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> tuple[list[dict], list[str]]:
+    """Table 17: perron employees with >= 3 violations, same logic as table 9."""
+    return build_avk_employees_table(df_perron, start, end)
+
+
+def build_perron_repeat_employees_table(
+    df_perron: pd.DataFrame | None,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[dict]:
+    """Table 17.1: perron repeat employees by subcategory, same logic as table 9.1."""
+    return build_avk_repeat_employees_table(df_perron, start, end)
 
 
 # ---------------------------------------------------------------------------
@@ -1528,7 +1637,10 @@ def build_month_tables(
         **perron_cat_data,
     }
 
+    _flat_sub_cols = ["Подкатегория", "Кол-во нарушений"]
     _tdb_cols = ["Подкатегория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)"]
+    _perron_emp_cols_default = ["Сотрудник", _COL_2M, _COL_1M, _COL_CUR]
+    _perron_repeat_cols = ["Подразделение/Сотрудник", "Подкатегория нарушения", "Кол-во нарушений"]
     if df_perron is not None:
         avs: dict = {"id": "avs_breakdown", "title": "11. Обслуживание ВС",
                      **build_avs_table(df_perron, start, end)}
@@ -1538,6 +1650,20 @@ def build_month_tables(
                      **build_ets_table(df_perron, start, end)}
         tdb: dict = {"id": "tdb_breakdown", "title": "14. Трудовая дисциплина и безопасность",
                      **build_tdb_table(df_perron, start, end)}
+        dkv: dict = {"id": "dkv_breakdown", "title": "15. Доставка клиентов с/до ВС",
+                     **build_dkv_table(df_perron, start, end)}
+        ob: dict = {"id": "ob_breakdown", "title": "16. Обслуживание багажа",
+                    **build_ob_table(df_perron, start, end)}
+        perron_emp_rows, perron_emp_cols = build_perron_employees_table(df_perron, start, end)
+        perron_emp_table: dict = {
+            "id": "perron_employees", "title": "17. Сотрудники перрон",
+            "columns": perron_emp_cols, "rows": perron_emp_rows,
+        }
+        perron_repeat_table: dict = {
+            "id": "perron_repeat_employees", "title": "17.1 Повторяющиеся сотрудники перрон",
+            "columns": _perron_repeat_cols,
+            "rows": build_perron_repeat_employees_table(df_perron, start, end),
+        }
     else:
         avs = _not_uploaded_table("avs_breakdown", "11. Обслуживание ВС",
                                   ["Категория", "Кол-во нарушений"])
@@ -1547,11 +1673,19 @@ def build_month_tables(
                                   ["Категория", "Кол-во нарушений", "Служба", "Кол-во нарушений (служба)",
                                    "Типовые нарушения", "Кол-во по службам"])
         tdb = _not_uploaded_table("tdb_breakdown", "14. Трудовая дисциплина и безопасность", _tdb_cols)
+        dkv = _not_uploaded_table("dkv_breakdown", "15. Доставка клиентов с/до ВС", _flat_sub_cols)
+        ob = _not_uploaded_table("ob_breakdown", "16. Обслуживание багажа", _flat_sub_cols)
+        perron_emp_table = _not_uploaded_table("perron_employees", "17. Сотрудники перрон",
+                                               _perron_emp_cols_default)
+        perron_repeat_table = _not_uploaded_table("perron_repeat_employees",
+                                                  "17.1 Повторяющиеся сотрудники перрон",
+                                                  _perron_repeat_cols)
 
     return [
         production_table, violations_appeals_table, avk_dept_table, avk_cat_table,
         *subcat_tables,
         employees_table, repeat_table,
         perron_dept_table, perron_cat_table,
-        avs, nvz, ets, tdb,
+        avs, nvz, ets, tdb, dkv, ob,
+        perron_emp_table, perron_repeat_table,
     ]
