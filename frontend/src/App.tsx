@@ -9,8 +9,8 @@ export default function App() {
     <div className="app-shell">
       <nav className="tab-nav">
         <div className="tab-nav-header">
-          <div className="tab-nav-logo">RMS</div>
-          <div className="tab-nav-subtitle">Reporting Suite</div>
+          <div className="tab-nav-logo">uHelp</div>
+          <div className="tab-nav-subtitle">for Analysts</div>
         </div>
         {TABS.map((tab) => (
           <button
