@@ -5,8 +5,7 @@ import { Granularity, SummaryTable as SummaryTableData, fetchQualitySummary, fet
 
 const GRANULARITIES: { id: Granularity; label: string }[] = [
   { id: "week", label: "Неделя" },
-  { id: "month", label: "Месяц" },
-  { id: "quarter", label: "Квартал" },
+  { id: "month", label: "Месяц/Квартал" },
   { id: "year", label: "Год" },
 ];
 
@@ -34,7 +33,7 @@ export default function QualityReportPage() {
 
   const invalidateCache = () => setTablesByGranularity({});
 
-  const isAggregated = granularity === "month" || granularity === "quarter" || granularity === "year";
+  const isAggregated = granularity === "month" || granularity === "year";
 
   const handleBuild = async () => {
     if (!startDate || !endDate) return;
