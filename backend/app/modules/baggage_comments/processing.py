@@ -40,7 +40,14 @@ def read_events_file(file_obj: BytesIO) -> pd.DataFrame:
         raise ValueError(f"В excel-файле событий нет колонок: {', '.join(sorted(missing))}")
 
     events = df[[EVENTS_DATE_COL, EVENTS_FLIGHT_COL, EVENTS_COMMENT_COL]].copy()
-    events = events.dropna(subset=[EVENTS_COMMENT_COL])
+    events = events.dropna(subset=[EVENTS_DATE_COL, EVENTS_FLIGHT_COL])
+    events[EVENTS_COMMENT_COL] = (
+        events[EVENTS_COMMENT_COL]
+        .fillna("СОБЫТИЕ БЕЗ ОПИСАНИЯ")
+        .astype(str)
+        .str.strip()
+        .replace("", "СОБЫТИЕ БЕЗ ОПИСАНИЯ")
+    )
     events["event_date"] = pd.to_datetime(events[EVENTS_DATE_COL], dayfirst=True).dt.strftime("%Y-%m-%d")
     events["flight_key"] = events[EVENTS_FLIGHT_COL].map(_normalize_flight_key)
 
