@@ -99,7 +99,7 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
     """
     Read perron violations file (ТАБЛИЦА sheet) and return DataFrame with
     columns [date, conclusion, department]. Deduplication on
-    (Дата, Описание, Авиакомпания, Место) is always applied.
+    (Дата, Описание, Авиакомпания, Место, Исполнитель) is always applied.
     """
     raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
     cols = list(raw.columns)
@@ -116,11 +116,14 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
             "В файле нарушений на перроне не найдены столбцы «Дата» и/или «Заключение»"
         )
 
-    # Deduplication
+    # Deduplication. «Исполнитель» обязателен в ключе: у нарушений трудовой
+    # дисциплины (СИЗ, жилет и т.п.) Авиакомпания/Место обычно пустые, и
+    # без исполнителя разные сотрудники, пойманные в один день на одном и
+    # том же нарушении, схлопывались бы в одну строку.
     desc_c = _find_col(cols, "описан")
     airline_c = _find_col(cols, "авиакомпани")
     place_c = _find_col(cols, "мест")
-    dedup_cols = [c for c in [date_c, desc_c, airline_c, place_c] if c is not None]
+    dedup_cols = [c for c in [date_c, desc_c, airline_c, place_c, exec_c] if c is not None]
     if dedup_cols:
         raw = raw.drop_duplicates(subset=dedup_cols, keep="first")
 
