@@ -591,18 +591,35 @@ def build_perron_departments_table(
     df_perron: pd.DataFrame | None,
     start: pd.Timestamp,
     end: pd.Timestamp,
+    df_perron_tdb: pd.DataFrame | None = None,
 ) -> list[dict]:
     """
     Table 10: per-department count of perron violations where Заключение = «с виной».
     ССТ and СПТ are merged into ДСТ. Ordered descending; ИТОГО at bottom.
+
+    Rows whose Категория belongs to «Трудовая дисциплина и безопасность»
+    (same parent categories as table 14) are taken from df_perron_tdb — deduped
+    with Исполнитель in the key, same logic as table 14 — while all other
+    categories keep using the standard dedup from df_perron.
     """
     if df_perron is None:
         return []
 
-    in_perron = df_perron[
-        (df_perron["date"] >= start)
-        & (df_perron["date"] <= end)
-        & (df_perron["conclusion"] == WITH_FAULT_CONCLUSION)
+    if df_perron_tdb is not None:
+        tdb_norm_set = {_norm_cat(c) for c in _TDB_PARENT_CATS_FILE}
+        is_tdb_std = df_perron["category"].apply(_norm_cat).isin(tdb_norm_set)
+        is_tdb_ext = df_perron_tdb["category"].apply(_norm_cat).isin(tdb_norm_set)
+        source = pd.concat(
+            [df_perron[~is_tdb_std], df_perron_tdb[is_tdb_ext]],
+            ignore_index=True,
+        )
+    else:
+        source = df_perron
+
+    in_perron = source[
+        (source["date"] >= start)
+        & (source["date"] <= end)
+        & (source["conclusion"] == WITH_FAULT_CONCLUSION)
     ].copy()
 
     # Merge ССТ and СПТ into ДСТ
@@ -1815,16 +1832,16 @@ def build_month_tables(
     else:
         repeat_table = _not_uploaded_table("avk_repeat_employees", "9.1 Повторяющиеся сотрудники АВК", repeat_cols)
 
-    # Table 10: perron departments (same dedup as table 14 — с Исполнителем в ключе)
+    # Table 10: perron departments. Categories from блока «Трудовая дисциплина
+    # и безопасность» use table 14's dedup (+Исполнитель), the rest use the
+    # standard dedup — see build_perron_departments_table.
     perron_dept_cols = ["Служба", "Кол-во нарушений"]
     if df_perron is not None:
         perron_dept_table: dict = {
             "id": "perron_departments",
             "title": "10. Количество нарушений на перроне",
             "columns": perron_dept_cols,
-            "rows": build_perron_departments_table(
-                df_perron_tdb if df_perron_tdb is not None else df_perron, start, end
-            ),
+            "rows": build_perron_departments_table(df_perron, start, end, df_perron_tdb),
         }
     else:
         perron_dept_table = _not_uploaded_table(
