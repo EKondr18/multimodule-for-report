@@ -1608,6 +1608,7 @@ def build_perron_categories_table(
 
 CANCELLED_STATUS = "Отменено"
 UTG_REQUESTOR = "UTG"
+EMPLOYEE_REQUESTOR = "Сотрудник"
 
 _APPEAL_TYPE_GROUPS = [
     "Жалоба",
@@ -1643,7 +1644,7 @@ def build_appeals_type_table(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> dict:
-    """Table 18: count by appeal type; filter Статус≠Отменено, Заявитель≠UTG."""
+    """Table 18: count by appeal type; filter Статус≠Отменено, Заявитель≠UTG/Сотрудник."""
     col_type, col_cnt = "Тип обращения", "Кол-во"
     columns = [col_type, col_cnt]
     if df_appeals is None:
@@ -1654,6 +1655,7 @@ def build_appeals_type_table(
         & (df_appeals["date"] <= end)
         & (df_appeals["status"] != CANCELLED_STATUS)
         & (df_appeals["requestor"] != UTG_REQUESTOR)
+        & (df_appeals["requestor"] != EMPLOYEE_REQUESTOR)
     )
     in_period = df_appeals[mask]
 
@@ -1702,7 +1704,7 @@ def build_claims_table(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> dict:
-    """Table 20: sum of Заявленная сумма and Принятая сумма (all rows in period)."""
+    """Table 20: sum of Заявленная сумма and Принятая сумма; filter Статус≠Отменено, Заявитель≠UTG/Сотрудник."""
     col_claimed, col_accepted = "Заявленная сумма", "Принятая сумма"
     columns = [col_claimed, col_accepted]
     if df_appeals is None:
@@ -1712,6 +1714,8 @@ def build_claims_table(
         (df_appeals["date"] >= start)
         & (df_appeals["date"] <= end)
         & (df_appeals["status"] != CANCELLED_STATUS)
+        & (df_appeals["requestor"] != UTG_REQUESTOR)
+        & (df_appeals["requestor"] != EMPLOYEE_REQUESTOR)
     ]
 
     claimed = round(float(in_period["claimed_amount"].sum()), 2)
