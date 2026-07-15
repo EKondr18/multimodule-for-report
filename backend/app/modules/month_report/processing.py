@@ -1815,14 +1815,16 @@ def build_month_tables(
     else:
         repeat_table = _not_uploaded_table("avk_repeat_employees", "9.1 Повторяющиеся сотрудники АВК", repeat_cols)
 
-    # Table 10: perron departments
+    # Table 10: perron departments (same dedup as table 14 — с Исполнителем в ключе)
     perron_dept_cols = ["Служба", "Кол-во нарушений"]
     if df_perron is not None:
         perron_dept_table: dict = {
             "id": "perron_departments",
             "title": "10. Количество нарушений на перроне",
             "columns": perron_dept_cols,
-            "rows": build_perron_departments_table(df_perron, start, end),
+            "rows": build_perron_departments_table(
+                df_perron_tdb if df_perron_tdb is not None else df_perron, start, end
+            ),
         }
     else:
         perron_dept_table = _not_uploaded_table(
