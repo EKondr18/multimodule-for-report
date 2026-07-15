@@ -44,6 +44,7 @@ async def month_summary(
         raise HTTPException(400, "Дата начала периода позже даты окончания")
 
     df_perron = None
+    df_perron_tdb = None
     df_avk = None
     df_appeals = None
     production_data = None
@@ -51,7 +52,11 @@ async def month_summary(
     try:
         if perron_file is not None and perron_file.filename:
             _check_excel(perron_file, "Нарушения на перроне")
-            df_perron = read_perron_full(BytesIO(await perron_file.read()))
+            perron_raw = await perron_file.read()
+            df_perron = read_perron_full(BytesIO(perron_raw))
+            # Отдельное чтение с расширенным ключом дедупликации (+Исполнитель)
+            # — только для таблицы 14, см. read_perron_full.
+            df_perron_tdb = read_perron_full(BytesIO(perron_raw), dedup_with_executor=True)
         if avk_file is not None and avk_file.filename:
             _check_excel(avk_file, "Нарушения в АВК")
             df_avk = read_avk_full(BytesIO(await avk_file.read()))
@@ -66,5 +71,8 @@ async def month_summary(
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
-    tables = build_month_tables(df_perron, df_avk, df_appeals, production_data, start, end, granularity)
+    tables = build_month_tables(
+        df_perron, df_avk, df_appeals, production_data, start, end, granularity,
+        df_perron_tdb=df_perron_tdb,
+    )
     return {"tables": tables}

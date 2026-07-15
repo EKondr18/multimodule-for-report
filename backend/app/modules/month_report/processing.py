@@ -95,11 +95,18 @@ def read_violations_simple(file_obj: BinaryIO, deduplicate: bool = False) -> pd.
     return result
 
 
-def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
+def read_perron_full(file_obj: BinaryIO, dedup_with_executor: bool = False) -> pd.DataFrame:
     """
     Read perron violations file (ТАБЛИЦА sheet) and return DataFrame with
     columns [date, conclusion, department]. Deduplication on
-    (Дата, Описание, Авиакомпания, Место, Исполнитель) is always applied.
+    (Дата, Описание, Авиакомпания, Место) is always applied.
+
+    dedup_with_executor=True additionally includes «Исполнитель» in the dedup
+    key — used only for table 14 (Трудовая дисциплина и безопасность), where
+    Авиакомпания/Место are typically blank and several employees can be cited
+    for the same violation on the same day; without the executor in the key
+    those distinct violations would incorrectly collapse into one row. All
+    other tables keep the original, narrower dedup key.
     """
     raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
     cols = list(raw.columns)
@@ -116,14 +123,13 @@ def read_perron_full(file_obj: BinaryIO) -> pd.DataFrame:
             "В файле нарушений на перроне не найдены столбцы «Дата» и/или «Заключение»"
         )
 
-    # Deduplication. «Исполнитель» обязателен в ключе: у нарушений трудовой
-    # дисциплины (СИЗ, жилет и т.п.) Авиакомпания/Место обычно пустые, и
-    # без исполнителя разные сотрудники, пойманные в один день на одном и
-    # том же нарушении, схлопывались бы в одну строку.
+    # Deduplication
     desc_c = _find_col(cols, "описан")
     airline_c = _find_col(cols, "авиакомпани")
     place_c = _find_col(cols, "мест")
-    dedup_cols = [c for c in [date_c, desc_c, airline_c, place_c, exec_c] if c is not None]
+    dedup_cols = [c for c in [date_c, desc_c, airline_c, place_c] if c is not None]
+    if dedup_with_executor and exec_c is not None:
+        dedup_cols.append(exec_c)
     if dedup_cols:
         raw = raw.drop_duplicates(subset=dedup_cols, keep="first")
 
@@ -1720,6 +1726,7 @@ def build_month_tables(
     start: pd.Timestamp,
     end: pd.Timestamp,
     granularity: str = "month",
+    df_perron_tdb: pd.DataFrame | None = None,
 ) -> list[dict]:
     production_columns = PRODUCTION_ROWS
 
@@ -1842,7 +1849,7 @@ def build_month_tables(
         ets: dict = {"id": "ets_breakdown", "title": "13. Эксплуатация ТС",
                      **build_ets_table(df_perron, start, end)}
         tdb: dict = {"id": "tdb_breakdown", "title": "14. Трудовая дисциплина и безопасность",
-                     **build_tdb_table(df_perron, start, end)}
+                     **build_tdb_table(df_perron_tdb if df_perron_tdb is not None else df_perron, start, end)}
         dkv: dict = {"id": "dkv_breakdown", "title": "15. Доставка клиентов с/до ВС",
                      **build_dkv_table(df_perron, start, end)}
         ob: dict = {"id": "ob_breakdown", "title": "16. Обслуживание багажа",
