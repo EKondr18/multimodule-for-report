@@ -68,18 +68,22 @@ async def quality_summary(
         if grh_file is not None and grh_file.filename:
             _check_excel_filename(grh_file, "Проверки GRH")
             grh_raw = await grh_file.read()
-            df_grh_rpo = read_grh_checks_sheet(BytesIO(grh_raw), RPO_CHECKS_SHEET)
-            df_grh_fo_siz = read_grh_checks_sheet(BytesIO(grh_raw), FO_SIZ_CHECKS_SHEET)
+            # Одна книга парсится один раз, а не по разу на каждый лист —
+            # раньше pd.ExcelFile(...) пересобирался с нуля для каждого листа.
+            grh_xl = pd.ExcelFile(BytesIO(grh_raw))
+            df_grh_rpo = read_grh_checks_sheet(grh_xl, RPO_CHECKS_SHEET)
+            df_grh_fo_siz = read_grh_checks_sheet(grh_xl, FO_SIZ_CHECKS_SHEET)
         if lir_file is not None and lir_file.filename:
             _check_excel_filename(lir_file, "Мониторинг LIR/СЗВ")
             df_lir = read_lir_szv_file(BytesIO(await lir_file.read()))
         if pab_file is not None and pab_file.filename:
             _check_excel_filename(pab_file, "Проверки PAB")
             pab_raw = await pab_file.read()
-            df_pab_fo_ethics = read_pab_checks_sheet(BytesIO(pab_raw), PAB_FO_ETHICS_SHEET)
-            df_pab_rk = read_pab_checks_sheet(BytesIO(pab_raw), PAB_RK_SHEET)
-            df_pab_pt = read_pab_checks_sheet(BytesIO(pab_raw), PAB_PT_SHEET)
-            df_pab_baggage = read_pab_checks_sheet(BytesIO(pab_raw), PAB_BAGGAGE_SHEET)
+            pab_xl = pd.ExcelFile(BytesIO(pab_raw))
+            df_pab_fo_ethics = read_pab_checks_sheet(pab_xl, PAB_FO_ETHICS_SHEET)
+            df_pab_rk = read_pab_checks_sheet(pab_xl, PAB_RK_SHEET)
+            df_pab_pt = read_pab_checks_sheet(pab_xl, PAB_PT_SHEET)
+            df_pab_baggage = read_pab_checks_sheet(pab_xl, PAB_BAGGAGE_SHEET)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:

@@ -188,8 +188,9 @@ def read_violations_file(file_obj: BytesIO) -> pd.DataFrame:
     return result
 
 
-def read_grh_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | None:
-    xl = pd.ExcelFile(file_obj)
+def read_grh_checks_sheet(xl: pd.ExcelFile, sheet_name: str) -> pd.DataFrame | None:
+    """xl — открытый один раз pd.ExcelFile на весь файл (несколько листов
+    читаются из него без повторного парсинга книги на каждый лист)."""
     if sheet_name not in xl.sheet_names:
         return None
 
@@ -204,8 +205,9 @@ def read_grh_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | 
     return result.dropna(subset=["date"])
 
 
-def read_pab_checks_sheet(file_obj: BytesIO, sheet_name: str) -> pd.DataFrame | None:
-    xl = pd.ExcelFile(file_obj)
+def read_pab_checks_sheet(xl: pd.ExcelFile, sheet_name: str) -> pd.DataFrame | None:
+    """xl — открытый один раз pd.ExcelFile на весь файл (несколько листов
+    читаются из него без повторного парсинга книги на каждый лист)."""
     if sheet_name not in xl.sheet_names:
         return None
 
