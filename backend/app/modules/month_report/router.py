@@ -28,7 +28,7 @@ async def month_summary(
         build_month_tables,
         read_appeals_file,
         read_avk_full,
-        read_perron_full,
+        read_perron_full_variants,
         read_production_file,
     )
 
@@ -53,10 +53,9 @@ async def month_summary(
         if perron_file is not None and perron_file.filename:
             _check_excel(perron_file, "Нарушения на перроне")
             perron_raw = await perron_file.read()
-            df_perron = read_perron_full(BytesIO(perron_raw))
-            # Отдельное чтение с расширенным ключом дедупликации (+Исполнитель)
-            # — только для таблицы 14, см. read_perron_full.
-            df_perron_tdb = read_perron_full(BytesIO(perron_raw), dedup_with_executor=True)
+            # Книга парсится один раз, а не по разу на каждый вариант дедупа
+            # (стандартный + с Исполнителем для таблицы 14) — см. processing.py.
+            df_perron, df_perron_tdb = read_perron_full_variants(BytesIO(perron_raw))
         if avk_file is not None and avk_file.filename:
             _check_excel(avk_file, "Нарушения в АВК")
             df_avk = read_avk_full(BytesIO(await avk_file.read()))

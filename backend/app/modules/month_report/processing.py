@@ -95,20 +95,7 @@ def read_violations_simple(file_obj: BinaryIO, deduplicate: bool = False) -> pd.
     return result
 
 
-def read_perron_full(file_obj: BinaryIO, dedup_with_executor: bool = False) -> pd.DataFrame:
-    """
-    Read perron violations file (ТАБЛИЦА sheet) and return DataFrame with
-    columns [date, conclusion, department]. Deduplication on
-    (Дата, Описание, Авиакомпания, Место) is always applied.
-
-    dedup_with_executor=True additionally includes «Исполнитель» in the dedup
-    key — used only for table 14 (Трудовая дисциплина и безопасность), where
-    Авиакомпания/Место are typically blank and several employees can be cited
-    for the same violation on the same day; without the executor in the key
-    those distinct violations would incorrectly collapse into one row. All
-    other tables keep the original, narrower dedup key.
-    """
-    raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
+def _dedup_and_shape_perron(raw: pd.DataFrame, dedup_with_executor: bool) -> pd.DataFrame:
     cols = list(raw.columns)
 
     date_c = _find_col(cols, "дата")
@@ -158,6 +145,37 @@ def read_perron_full(file_obj: BinaryIO, dedup_with_executor: bool = False) -> p
         else:
             result[col] = ""
     return result
+
+
+def read_perron_full(file_obj: BinaryIO, dedup_with_executor: bool = False) -> pd.DataFrame:
+    """
+    Read perron violations file (ТАБЛИЦА sheet) and return DataFrame with
+    columns [date, conclusion, department]. Deduplication on
+    (Дата, Описание, Авиакомпания, Место) is always applied.
+
+    dedup_with_executor=True additionally includes «Исполнитель» in the dedup
+    key — used only for table 14 (Трудовая дисциплина и безопасность), where
+    Авиакомпания/Место are typically blank and several employees can be cited
+    for the same violation on the same day; without the executor in the key
+    those distinct violations would incorrectly collapse into one row. All
+    other tables keep the original, narrower dedup key.
+    """
+    raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
+    return _dedup_and_shape_perron(raw, dedup_with_executor)
+
+
+def read_perron_full_variants(file_obj: BinaryIO) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Same as read_perron_full, but parses the workbook only once and returns
+    both dedup variants — (standard, with_executor) — instead of parsing the
+    same file twice (previously the router called read_perron_full separately
+    for each variant, re-running pd.read_excel over the whole workbook both
+    times).
+    """
+    raw = pd.read_excel(file_obj, sheet_name=VIOLATIONS_SHEET)
+    standard = _dedup_and_shape_perron(raw.copy(), dedup_with_executor=False)
+    with_executor = _dedup_and_shape_perron(raw.copy(), dedup_with_executor=True)
+    return standard, with_executor
 
 
 def read_avk_full(file_obj: BinaryIO) -> pd.DataFrame:
