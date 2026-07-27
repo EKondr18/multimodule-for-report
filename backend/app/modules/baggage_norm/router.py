@@ -40,6 +40,12 @@ def _rows(datalens) -> list[dict]:
 
 
 def _append_to_datalens(df_new, message: str):
+    """Дописывает производные строки новой выгрузки в datalens.csv.
+
+    Как и в merge_with_master, дедупликация ищет совпадения только среди
+    строк, чья дата попадает в диапазон новой выгрузки (сравнение по строкам
+    "YYYY-MM-DD" — лексикографический порядок совпадает с хронологическим),
+    а не по всему архиву — он уже дедуплицирован раньше."""
     import pandas as pd
     from app.core import github_storage
     from app.modules.baggage_norm.processing import derive_datalens
@@ -48,7 +54,18 @@ def _append_to_datalens(df_new, message: str):
     new_rows["date"] = new_rows["date"].dt.strftime("%Y-%m-%d")
 
     existing, sha = _load_datalens()
-    combined = pd.concat([existing, new_rows], ignore_index=True).drop_duplicates()
+    if existing.empty:
+        combined = new_rows.drop_duplicates()
+    else:
+        period_start = new_rows["date"].min()
+        period_end = new_rows["date"].max()
+        in_period_mask = (existing["date"] >= period_start) & (existing["date"] <= period_end)
+
+        untouched = existing[~in_period_mask]
+        in_period = pd.concat([existing[in_period_mask], new_rows], ignore_index=True)
+        in_period = in_period.drop_duplicates()
+
+        combined = pd.concat([untouched, in_period], ignore_index=True)
     combined = combined.sort_values("date").reset_index(drop=True)
 
     github_storage.write_file(DATALENS_PATH, combined.to_csv(index=False), message=message, sha=sha)

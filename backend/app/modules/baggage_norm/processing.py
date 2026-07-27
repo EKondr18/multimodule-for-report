@@ -175,9 +175,30 @@ def read_weekly_excel(file_obj: BytesIO) -> pd.DataFrame:
 
 
 def merge_with_master(df_master: pd.DataFrame, df_new: pd.DataFrame) -> pd.DataFrame:
-    combined = pd.concat([df_master, df_new], ignore_index=True)
-    combined["date"] = pd.to_datetime(combined["date"])
-    combined = combined.drop_duplicates(["date", "flight", "mc"])
+    """Дописывает новую выгрузку к архиву.
+
+    Дедупликация ищет совпадения только среди строк архива, чьи даты попадают
+    в диапазон новой выгрузки, — остальной архив уже дедуплицирован раньше и
+    повторно не пересматривается. Это заметно сокращает объём обрабатываемых
+    данных на каждой загрузке, т.к. архив со временем растёт, а новая
+    выгрузка обычно покрывает лишь последнюю неделю.
+    """
+    if df_master.empty:
+        return df_new.drop_duplicates(["date", "flight", "mc"]).reset_index(drop=True)
+
+    df_master = df_master.copy()
+    df_master["date"] = pd.to_datetime(df_master["date"])
+
+    period_start = df_new["date"].min()
+    period_end = df_new["date"].max()
+    in_period_mask = (df_master["date"] >= period_start) & (df_master["date"] <= period_end)
+
+    untouched = df_master[~in_period_mask]
+    in_period = pd.concat([df_master[in_period_mask], df_new], ignore_index=True)
+    in_period = in_period.drop_duplicates(["date", "flight", "mc"])
+
+    combined = pd.concat([untouched, in_period], ignore_index=True)
+    combined = combined.sort_values("date").reset_index(drop=True)
     return combined
 
 
