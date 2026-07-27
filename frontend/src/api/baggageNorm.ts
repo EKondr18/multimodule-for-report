@@ -13,8 +13,8 @@ interface ProcessResponse {
   total: number;
 }
 
-export async function fetchCurrent(): Promise<BaggageRow[]> {
-  const res = await fetch(apiUrl("/api/baggage-norm/current"));
+export async function fetchCurrent(signal?: AbortSignal): Promise<BaggageRow[]> {
+  const res = await fetch(apiUrl("/api/baggage-norm/current"), { signal });
   const data = await parseErrorOrJson<{ rows: BaggageRow[] }>(res);
   return data.rows;
 }

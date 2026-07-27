@@ -19,9 +19,17 @@ export default function BaggageNormPage() {
   const [endDate, setEndDate] = useState("");
 
   useEffect(() => {
-    fetchCurrent()
+    const controller = new AbortController();
+    fetchCurrent(controller.signal)
       .then(setRows)
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        if (e.name !== "AbortError") setError(e.message);
+      });
+    // Отменяем запрос при уходе со вкладки — иначе он продолжает висеть в
+    // фоне (архив читается из GitHub и может занимать много времени) и на
+    // Vercel способен утащить с собой другие параллельные запросы, когда
+    // соединение обрывается по таймауту.
+    return () => controller.abort();
   }, []);
 
   const handleFile = async (file: File) => {
