@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO, StringIO
 
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -8,6 +8,13 @@ router = APIRouter(prefix="/api/baggage-norm", tags=["baggage-norm"])
 
 MASTER_PATH = "data/baggage_norm/master.csv"
 DATALENS_PATH = "data/baggage_norm/datalens.csv"
+
+# /current отдаёт в браузер только превью за последние PREVIEW_DAYS дней —
+# архив растёт с каждой загрузкой (уже 80000+ строк), и конвертация всего
+# датафрейма в JSON на каждое открытие вкладки сама по себе упирается в
+# лимит времени выполнения на Vercel. Полный архив по-прежнему доступен
+# через /download (csv отдаётся потоково, без прогона через JSON).
+PREVIEW_DAYS = 30
 
 
 def _load_master():
@@ -71,7 +78,13 @@ def _merge_datalens(existing, df_new):
 @router.get("/current")
 def get_current():
     datalens, _ = _load_datalens()
-    return {"rows": _rows(datalens), "total": len(datalens)}
+    total = len(datalens)
+    if datalens.empty:
+        preview = datalens
+    else:
+        cutoff = (date.today() - timedelta(days=PREVIEW_DAYS)).isoformat()
+        preview = datalens[datalens["date"] >= cutoff]
+    return {"rows": _rows(preview), "total": total, "preview_days": PREVIEW_DAYS}
 
 
 @router.post("/process")
@@ -114,10 +127,13 @@ async def process_weekly_file(file: UploadFile):
         ),
     )
 
+    cutoff = (date.today() - timedelta(days=PREVIEW_DAYS)).isoformat()
+    preview = combined_datalens[combined_datalens["date"] >= cutoff]
     return {
-        "rows": _rows(combined_datalens),
+        "rows": _rows(preview),
         "added": len(df_new),
         "total": len(combined_datalens),
+        "preview_days": PREVIEW_DAYS,
     }
 
 

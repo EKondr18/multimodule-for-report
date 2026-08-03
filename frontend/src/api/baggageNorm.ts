@@ -11,12 +11,18 @@ interface ProcessResponse {
   rows: BaggageRow[];
   added: number;
   total: number;
+  preview_days: number;
 }
 
-export async function fetchCurrent(signal?: AbortSignal): Promise<BaggageRow[]> {
+export interface CurrentResponse {
+  rows: BaggageRow[];
+  total: number;
+  preview_days: number;
+}
+
+export async function fetchCurrent(signal?: AbortSignal): Promise<CurrentResponse> {
   const res = await fetch(apiUrl("/api/baggage-norm/current"), { signal });
-  const data = await parseErrorOrJson<{ rows: BaggageRow[] }>(res);
-  return data.rows;
+  return parseErrorOrJson<CurrentResponse>(res);
 }
 
 export async function uploadWeeklyFile(file: File): Promise<ProcessResponse> {

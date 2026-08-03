@@ -12,6 +12,8 @@ const COLUMNS = [
 
 export default function BaggageNormPage() {
   const [rows, setRows] = useState<BaggageRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [previewDays, setPreviewDays] = useState(30);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +23,11 @@ export default function BaggageNormPage() {
   useEffect(() => {
     const controller = new AbortController();
     fetchCurrent(controller.signal)
-      .then(setRows)
+      .then((data) => {
+        setRows(data.rows);
+        setTotal(data.total);
+        setPreviewDays(data.preview_days);
+      })
       .catch((e) => {
         if (e.name !== "AbortError") setError(e.message);
       });
@@ -39,6 +45,8 @@ export default function BaggageNormPage() {
     try {
       const result = await uploadWeeklyFile(file);
       setRows(result.rows);
+      setTotal(result.total);
+      setPreviewDays(result.preview_days);
       setMessage(`Добавлено ${result.added} строк, всего в архиве ${result.total}.`);
     } catch (e) {
       setError((e as Error).message);
@@ -61,7 +69,7 @@ export default function BaggageNormPage() {
 
       <div className="card">
         <h3>2. Итоговый файл для DataLens</h3>
-        <button className="btn" onClick={() => downloadDatalensCsv()} disabled={rows.length === 0}>
+        <button className="btn" onClick={() => downloadDatalensCsv()} disabled={total === 0}>
           Скачать csv (весь архив)
         </button>
 
@@ -79,7 +87,7 @@ export default function BaggageNormPage() {
             <button
               className="btn"
               onClick={() => downloadDatalensCsv(startDate || undefined, endDate || undefined)}
-              disabled={rows.length === 0 || (!startDate && !endDate)}
+              disabled={total === 0 || (!startDate && !endDate)}
             >
               Скачать csv за период
             </button>
@@ -87,6 +95,10 @@ export default function BaggageNormPage() {
         </div>
 
         <div style={{ marginTop: 16 }}>
+          <div className="status-msg">
+            Показаны последние {previewDays} дней ({rows.length} строк). Всего в архиве {total} строк —
+            для полного периода используйте скачивание csv выше.
+          </div>
           <FilterableTable columns={COLUMNS} rows={rows as unknown as Record<string, string>[]} />
         </div>
       </div>
