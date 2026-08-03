@@ -6,8 +6,7 @@
 конфликтов при параллельной записи).
 """
 
-from base64 import b64decode
-
+import requests
 from github import Github, GithubException
 
 from app.config import GITHUB_BRANCH, GITHUB_REPO, GITHUB_TOKEN
@@ -22,8 +21,13 @@ def _repo():
 def read_file(path: str) -> tuple[str | None, str | None]:
     """Возвращает (содержимое, sha) или (None, None), если файла ещё нет.
 
-    Contents API отдаёт поле content пустым для файлов больше ~1 МБ — в этом
-    случае докачиваем содержимое через Git Blobs API (лимит там — 100 МБ).
+    Для файлов больше ~1 МБ обычный Contents API отдаёт поле content пустым.
+    Раньше в этом случае содержимое докачивалось через Git Blobs API —
+    отдельный запрос, где GitHub всё равно кодирует файл в base64 внутри
+    JSON-ответа (для 5+ МБ csv это заметно медленнее, чем raw-скачивание).
+    Вместо этого запрашиваем содержимое напрямую с media type
+    application/vnd.github.raw+json — GitHub отдаёт сырые байты без base64/JSON,
+    без ограничения в ~1 МБ.
     """
     repo = _repo()
     try:
@@ -33,10 +37,21 @@ def read_file(path: str) -> tuple[str | None, str | None]:
             return None, None
         raise
     if content_file.content:
-        raw = content_file.content
+        content = content_file.decoded_content.decode("utf-8")
     else:
-        raw = repo.get_git_blob(content_file.sha).content
-    return b64decode(raw).decode("utf-8"), content_file.sha
+        resp = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}",
+            params={"ref": GITHUB_BRANCH},
+            headers={
+                "Authorization": f"Bearer {GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.raw+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        content = resp.text
+    return content, content_file.sha
 
 
 def write_file(path: str, content: str, message: str, sha: str | None = None) -> None:
