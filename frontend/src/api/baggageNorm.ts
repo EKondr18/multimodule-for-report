@@ -2,7 +2,7 @@ import { apiUrl, parseErrorOrJson } from "./base";
 
 interface ProcessResponse {
   added: number;
-  total: number;
+  months: string;
 }
 
 export async function uploadWeeklyFile(file: File): Promise<ProcessResponse> {

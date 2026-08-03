@@ -15,7 +15,7 @@ export default function BaggageNormPage() {
     setMessage(null);
     try {
       const result = await uploadWeeklyFile(file);
-      setMessage(`Добавлено ${result.added} строк, всего в архиве ${result.total}.`);
+      setMessage(`Добавлено ${result.added} строк (${result.months}).`);
     } catch (e) {
       setError((e as Error).message);
     } finally {

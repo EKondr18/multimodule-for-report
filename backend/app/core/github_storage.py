@@ -54,6 +54,21 @@ def read_file(path: str) -> tuple[str | None, str | None]:
     return content, content_file.sha
 
 
+def list_files(directory: str) -> list[str]:
+    """Возвращает список путей файлов в директории (не рекурсивно), либо
+    пустой список, если директории ещё нет."""
+    repo = _repo()
+    try:
+        contents = repo.get_contents(directory, ref=GITHUB_BRANCH)
+    except GithubException as exc:
+        if exc.status == 404:
+            return []
+        raise
+    if not isinstance(contents, list):
+        return []
+    return [c.path for c in contents if c.type == "file"]
+
+
 def write_file(path: str, content: str, message: str, sha: str | None = None) -> None:
     """Создаёт файл, если его не было, либо перезаписывает существующий.
 
