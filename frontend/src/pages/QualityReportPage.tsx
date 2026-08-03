@@ -27,6 +27,7 @@ export default function QualityReportPage() {
     Partial<Record<Granularity, SummaryTableData[]>>
   >({});
   const [loading, setLoading] = useState(false);
+  const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const tables = tablesByGranularity[granularity] ?? [];
@@ -46,14 +47,16 @@ export default function QualityReportPage() {
           { perron: perronFile, avk: avkFile, appeals: appealsFile, production: productionFile },
           startDate,
           endDate,
-          granularity
+          granularity,
+          setWaking
         );
       } else {
         result = await fetchQualitySummary(
           { perron: perronFile, avk: avkFile, grh: grhFile, lir: lirFile, pab: pabFile },
           startDate,
           endDate,
-          granularity
+          granularity,
+          setWaking
         );
       }
       setTablesByGranularity((prev) => ({ ...prev, [granularity]: result.tables }));
@@ -61,6 +64,7 @@ export default function QualityReportPage() {
       setError((e as Error).message);
     } finally {
       setLoading(false);
+      setWaking(false);
     }
   };
 
@@ -179,7 +183,8 @@ export default function QualityReportPage() {
           <button className="btn" onClick={handleBuild} disabled={!startDate || !endDate || loading}>
             Сформировать
           </button>
-          {loading && <div className="status-msg">Обработка файлов…</div>}
+          {waking && <div className="status-msg">Сервер просыпается, подождите…</div>}
+          {loading && !waking && <div className="status-msg">Обработка файлов…</div>}
           {error && <div className="status-msg error">{error}</div>}
         </div>
 

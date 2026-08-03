@@ -32,6 +32,7 @@ export default function BaggageCommentsPage() {
   const [totals, setTotals] = useState<Record<string, number> | undefined>(undefined);
   const [xlsxBase64, setXlsxBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [waking, setWaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const changeStation = (next: Station) => {
@@ -50,12 +51,12 @@ export default function BaggageCommentsPage() {
     setError(null);
     try {
       if (station === "tbs") {
-        const result = await processBaggageComments(normFile, eventsFile, "tbs");
+        const result = await processBaggageComments(normFile, eventsFile, "tbs", setWaking);
         setRows(result.rows);
         setTotals(result.totals);
         setXlsxBase64(result.xlsx_base64);
       } else {
-        const result = await processBaggageComments(normFile, eventsFile, "vko");
+        const result = await processBaggageComments(normFile, eventsFile, "vko", setWaking);
         setRows(result.rows);
         setTotals(undefined);
         setXlsxBase64(result.xlsx_base64);
@@ -64,6 +65,7 @@ export default function BaggageCommentsPage() {
       setError((e as Error).message);
     } finally {
       setLoading(false);
+      setWaking(false);
     }
   };
 
@@ -119,7 +121,8 @@ export default function BaggageCommentsPage() {
         <button className="btn" onClick={handleProcess} disabled={!normFile || !eventsFile || loading}>
           Объединить
         </button>
-        {loading && <div className="status-msg">Обработка файлов…</div>}
+        {waking && <div className="status-msg">Сервер просыпается, подождите…</div>}
+        {loading && !waking && <div className="status-msg">Обработка файлов…</div>}
         {error && <div className="status-msg error">{error}</div>}
       </div>
 

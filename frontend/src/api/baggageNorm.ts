@@ -1,14 +1,21 @@
-import { apiUrl, parseErrorOrJson } from "./base";
+import { apiUrl, fetchWithWakeup, parseErrorOrJson } from "./base";
 
 interface ProcessResponse {
   added: number;
   months: string;
 }
 
-export async function uploadWeeklyFile(file: File): Promise<ProcessResponse> {
+export async function uploadWeeklyFile(
+  file: File,
+  onWaking?: (waking: boolean) => void
+): Promise<ProcessResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(apiUrl("/api/baggage-norm/process"), { method: "POST", body: formData });
+  const res = await fetchWithWakeup(
+    apiUrl("/api/baggage-norm/process"),
+    { method: "POST", body: formData },
+    onWaking
+  );
   return parseErrorOrJson<ProcessResponse>(res);
 }
 

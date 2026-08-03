@@ -1,4 +1,4 @@
-import { apiUrl, parseErrorOrJson } from "./base";
+import { apiUrl, fetchWithWakeup, parseErrorOrJson } from "./base";
 
 export interface CommentRow {
   date: string;
@@ -33,23 +33,30 @@ interface TbsProcessResponse {
 export async function processBaggageComments(
   normFile: File,
   eventsFile: File,
-  station: "vko"
+  station: "vko",
+  onWaking?: (waking: boolean) => void
 ): Promise<ProcessResponse>;
 export async function processBaggageComments(
   normFile: File,
   eventsFile: File,
-  station: "tbs"
+  station: "tbs",
+  onWaking?: (waking: boolean) => void
 ): Promise<TbsProcessResponse>;
 export async function processBaggageComments(
   normFile: File,
   eventsFile: File,
-  station: Station
+  station: Station,
+  onWaking?: (waking: boolean) => void
 ): Promise<ProcessResponse | TbsProcessResponse> {
   const formData = new FormData();
   formData.append("norm_file", normFile);
   formData.append("events_file", eventsFile);
   formData.append("station", station);
-  const res = await fetch(apiUrl("/api/baggage-comments/process"), { method: "POST", body: formData });
+  const res = await fetchWithWakeup(
+    apiUrl("/api/baggage-comments/process"),
+    { method: "POST", body: formData },
+    onWaking
+  );
   return parseErrorOrJson<ProcessResponse | TbsProcessResponse>(res);
 }
 

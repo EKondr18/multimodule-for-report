@@ -4,6 +4,7 @@ import { downloadDatalensCsv, uploadWeeklyFile } from "../api/baggageNorm";
 
 export default function BaggageNormPage() {
   const [loading, setLoading] = useState(false);
+  const [waking, setWaking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState("");
@@ -14,12 +15,13 @@ export default function BaggageNormPage() {
     setError(null);
     setMessage(null);
     try {
-      const result = await uploadWeeklyFile(file);
+      const result = await uploadWeeklyFile(file, setWaking);
       setMessage(`Добавлено ${result.added} строк (${result.months}).`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
+      setWaking(false);
     }
   };
 
@@ -30,7 +32,8 @@ export default function BaggageNormPage() {
       <div className="card">
         <h3>1. Загрузить выгрузку BI МАВ за неделю (xlsx)</h3>
         <FileUpload onFile={handleFile} disabled={loading} />
-        {loading && <div className="status-msg">Обработка файла и обновление архива в GitHub…</div>}
+        {waking && <div className="status-msg">Сервер просыпается, подождите…</div>}
+        {loading && !waking && <div className="status-msg">Обработка файла и обновление архива в GitHub…</div>}
         {message && <div className="status-msg">{message}</div>}
         {error && <div className="status-msg error">{error}</div>}
       </div>

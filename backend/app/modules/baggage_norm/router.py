@@ -85,24 +85,33 @@ def _merge_datalens(existing, df_new):
 @router.post("/process")
 async def process_weekly_file(file: UploadFile):
     import asyncio
+    import time
 
     import pandas as pd
     from app.core import github_storage
     from app.modules.baggage_norm.processing import empty_master, merge_with_master, read_weekly_excel
     from app.modules.baggage_norm.processing import DATALENS_COLUMNS
 
+    t0 = time.perf_counter()
+
+    def _log(label: str) -> None:
+        print(f"[baggage_norm/process] {label}: {time.perf_counter() - t0:.2f}s", flush=True)
+
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Ожидается файл Excel (.xlsx/.xls)")
 
     raw = await file.read()
+    _log(f"file read from request ({len(raw)/1e6:.2f} MB)")
     try:
         df_new = read_weekly_excel(BytesIO(raw))
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
+    _log(f"xlsx parsed ({len(df_new)} строк)")
 
     df_new = df_new.copy()
     df_new["_month"] = df_new["date"].apply(_month_key)
     months = sorted(df_new["_month"].unique())
+    _log(f"months detected: {months}")
 
     # 1. Пробуем прочитать уже существующие месячные файлы — параллельно.
     master_paths = {m: f"{MASTER_DIR}/{m}.csv" for m in months}
@@ -113,17 +122,20 @@ async def process_weekly_file(file: UploadFile):
     )
     master_reads = dict(zip(months, read_results[: len(months)]))
     datalens_reads = dict(zip(months, read_results[len(months) :]))
+    _log("monthly files read")
 
     # 2. Для месяцев, у которых ещё нет отдельного файла, один раз (не по
     # разу на месяц) подтягиваем legacy-архив и режем его по месяцам.
     needs_legacy = any(master_reads[m][0] is None for m in months) or any(
         datalens_reads[m][0] is None for m in months
     )
+    _log(f"needs_legacy={needs_legacy}")
     if needs_legacy:
         legacy_master, legacy_datalens = await asyncio.gather(
             asyncio.to_thread(_load_legacy_master),
             asyncio.to_thread(_load_legacy_datalens),
         )
+        _log(f"legacy archive read (master {len(legacy_master)} строк, datalens {len(legacy_datalens)} строк)")
     else:
         legacy_master = None
         legacy_datalens = None

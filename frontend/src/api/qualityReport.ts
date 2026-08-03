@@ -1,4 +1,4 @@
-import { apiUrl, parseErrorOrJson } from "./base";
+import { apiUrl, fetchWithWakeup, parseErrorOrJson } from "./base";
 
 export type Granularity = "week" | "month" | "quarter" | "year";
 
@@ -25,7 +25,8 @@ export async function fetchQualitySummary(
   files: { perron?: File | null; avk?: File | null; grh?: File | null; lir?: File | null; pab?: File | null },
   startDate: string,
   endDate: string,
-  granularity: Granularity
+  granularity: Granularity,
+  onWaking?: (waking: boolean) => void
 ): Promise<SummaryResponse> {
   const formData = new FormData();
   if (files.perron) formData.append("perron_file", files.perron);
@@ -36,7 +37,11 @@ export async function fetchQualitySummary(
   formData.append("start_date", startDate);
   formData.append("end_date", endDate);
   formData.append("granularity", granularity);
-  const res = await fetch(apiUrl("/api/quality-report/summary"), { method: "POST", body: formData });
+  const res = await fetchWithWakeup(
+    apiUrl("/api/quality-report/summary"),
+    { method: "POST", body: formData },
+    onWaking
+  );
   return parseErrorOrJson<SummaryResponse>(res);
 }
 
@@ -44,7 +49,8 @@ export async function fetchMonthSummary(
   files: { perron?: File | null; avk?: File | null; appeals?: File | null; production?: File | null },
   startDate: string,
   endDate: string,
-  granularity: Granularity
+  granularity: Granularity,
+  onWaking?: (waking: boolean) => void
 ): Promise<SummaryResponse> {
   const formData = new FormData();
   if (files.perron) formData.append("perron_file", files.perron);
@@ -54,6 +60,10 @@ export async function fetchMonthSummary(
   formData.append("start_date", startDate);
   formData.append("end_date", endDate);
   formData.append("granularity", granularity);
-  const res = await fetch(apiUrl("/api/month-report/summary"), { method: "POST", body: formData });
+  const res = await fetchWithWakeup(
+    apiUrl("/api/month-report/summary"),
+    { method: "POST", body: formData },
+    onWaking
+  );
   return parseErrorOrJson<SummaryResponse>(res);
 }
