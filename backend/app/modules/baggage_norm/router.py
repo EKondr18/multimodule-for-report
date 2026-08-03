@@ -39,21 +39,20 @@ def _rows(datalens) -> list[dict]:
     return datalens.to_dict(orient="records")
 
 
-def _append_to_datalens(df_new, message: str):
-    """Дописывает производные строки новой выгрузки в datalens.csv.
+def _merge_datalens(existing, df_new):
+    """Чистая функция без сетевых вызовов: дописывает производные строки
+    новой выгрузки поверх уже загруженного datalens.csv.
 
     Как и в merge_with_master, дедупликация ищет совпадения только среди
     строк, чья дата попадает в диапазон новой выгрузки (сравнение по строкам
     "YYYY-MM-DD" — лексикографический порядок совпадает с хронологическим),
     а не по всему архиву — он уже дедуплицирован раньше."""
     import pandas as pd
-    from app.core import github_storage
     from app.modules.baggage_norm.processing import derive_datalens
 
     new_rows = derive_datalens(df_new).copy()
     new_rows["date"] = new_rows["date"].dt.strftime("%Y-%m-%d")
 
-    existing, sha = _load_datalens()
     if existing.empty:
         combined = new_rows.drop_duplicates()
     else:
@@ -66,10 +65,7 @@ def _append_to_datalens(df_new, message: str):
         in_period = in_period.drop_duplicates()
 
         combined = pd.concat([untouched, in_period], ignore_index=True)
-    combined = combined.sort_values("date").reset_index(drop=True)
-
-    github_storage.write_file(DATALENS_PATH, combined.to_csv(index=False), message=message, sha=sha)
-    return combined
+    return combined.sort_values("date").reset_index(drop=True)
 
 
 @router.get("/current")
@@ -80,6 +76,8 @@ def get_current():
 
 @router.post("/process")
 async def process_weekly_file(file: UploadFile):
+    import asyncio
+
     from app.core import github_storage
     from app.modules.baggage_norm.processing import merge_with_master, read_weekly_excel
 
@@ -92,17 +90,34 @@ async def process_weekly_file(file: UploadFile):
     except Exception as exc:
         raise HTTPException(400, f"Не удалось разобрать файл: {exc}") from exc
 
-    df_master, sha = _load_master()
+    # master.csv и datalens.csv независимы друг от друга — читаем и потом
+    # пишем их параллельно (2 сетевых похода к GitHub вместо 4 последовательных),
+    # т.к. каждый Contents API round-trip может занимать заметное время, а на
+    # Vercel Hobby жёсткий лимит на выполнение функции — 10 секунд.
+    (df_master, master_sha), (existing_datalens, datalens_sha) = await asyncio.gather(
+        asyncio.to_thread(_load_master),
+        asyncio.to_thread(_load_datalens),
+    )
+
     combined_master = merge_with_master(df_master, df_new)
+    combined_datalens = _merge_datalens(existing_datalens, df_new)
 
     commit_message = f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)"
-    github_storage.write_file(MASTER_PATH, combined_master.to_csv(index=False), message=commit_message, sha=sha)
-    datalens = _append_to_datalens(df_new, message=commit_message)
+    await asyncio.gather(
+        asyncio.to_thread(
+            github_storage.write_file,
+            MASTER_PATH, combined_master.to_csv(index=False), commit_message, master_sha,
+        ),
+        asyncio.to_thread(
+            github_storage.write_file,
+            DATALENS_PATH, combined_datalens.to_csv(index=False), commit_message, datalens_sha,
+        ),
+    )
 
     return {
-        "rows": _rows(datalens),
+        "rows": _rows(combined_datalens),
         "added": len(df_new),
-        "total": len(datalens),
+        "total": len(combined_datalens),
     }
 
 
