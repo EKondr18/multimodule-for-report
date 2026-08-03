@@ -82,15 +82,74 @@ def _merge_datalens(existing, df_new):
     return combined.sort_values("date").reset_index(drop=True)
 
 
+def _process_month_sync(m, df_new_month, commit_message, legacy_master, legacy_datalens):
+    """Синхронная read-merge-write операция для одного месяца, с повтором
+    при конфликте версий (кто-то — например, параллельный повторный запрос
+    с фронтенда — успел записать этот же файл между нашим чтением и записью).
+
+    Раньше конфликт при записи (GithubException 409/422) просто вылетал
+    исключением из asyncio.gather и обрывал ответ, из-за чего запись за
+    один из месяцев многострочной выгрузки могла тихо потеряться, если
+    несколько одновременных попыток загрузки гонялись за один и тот же
+    новый файл (см. баг с пропавшими данными за август при повторных
+    попытках после «пробуждения» Render). Теперь при конфликте состояние
+    перечитывается заново и merge повторяется на актуальных данных."""
+    import pandas as pd
+    from github import GithubException
+
+    from app.core import github_storage
+    from app.modules.baggage_norm.processing import (
+        DATALENS_COLUMNS, empty_master, merge_with_master,
+    )
+
+    master_path = f"{MASTER_DIR}/{m}.csv"
+    datalens_path = f"{DATALENS_DIR}/{m}.csv"
+
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        master_content, master_sha = github_storage.read_file(master_path)
+        if master_content is not None:
+            df_master_existing = pd.read_csv(StringIO(master_content))
+            if not df_master_existing.empty:
+                df_master_existing["date"] = pd.to_datetime(df_master_existing["date"])
+        elif legacy_master is not None and not legacy_master.empty:
+            month_mask = legacy_master["date"].apply(_month_key) == m
+            df_master_existing = legacy_master[month_mask].reset_index(drop=True)
+        else:
+            df_master_existing = empty_master()
+
+        datalens_content, datalens_sha = github_storage.read_file(datalens_path)
+        if datalens_content is not None:
+            df_datalens_existing = pd.read_csv(StringIO(datalens_content))
+        elif legacy_datalens is not None and not legacy_datalens.empty:
+            month_mask = legacy_datalens["date"].astype(str).str.startswith(m)
+            df_datalens_existing = legacy_datalens[month_mask].reset_index(drop=True)
+        else:
+            df_datalens_existing = pd.DataFrame(columns=DATALENS_COLUMNS)
+
+        combined_master = merge_with_master(df_master_existing, df_new_month)
+        combined_datalens = _merge_datalens(df_datalens_existing, df_new_month)
+
+        try:
+            github_storage.write_file(
+                master_path, combined_master.to_csv(index=False), commit_message, master_sha,
+            )
+            github_storage.write_file(
+                datalens_path, combined_datalens.to_csv(index=False), commit_message, datalens_sha,
+            )
+            return
+        except GithubException as exc:
+            if exc.status in (409, 422) and attempt < max_attempts - 1:
+                continue
+            raise
+
+
 @router.post("/process")
 async def process_weekly_file(file: UploadFile):
     import asyncio
     import time
 
-    import pandas as pd
-    from app.core import github_storage
-    from app.modules.baggage_norm.processing import empty_master, merge_with_master, read_weekly_excel
-    from app.modules.baggage_norm.processing import DATALENS_COLUMNS
+    from app.modules.baggage_norm.processing import read_weekly_excel
 
     t0 = time.perf_counter()
 
@@ -113,74 +172,39 @@ async def process_weekly_file(file: UploadFile):
     months = sorted(df_new["_month"].unique())
     _log(f"months detected: {months}")
 
-    # 1. Пробуем прочитать уже существующие месячные файлы — параллельно.
-    master_paths = {m: f"{MASTER_DIR}/{m}.csv" for m in months}
-    datalens_paths = {m: f"{DATALENS_DIR}/{m}.csv" for m in months}
-    read_results = await asyncio.gather(
-        *[asyncio.to_thread(github_storage.read_file, master_paths[m]) for m in months],
-        *[asyncio.to_thread(github_storage.read_file, datalens_paths[m]) for m in months],
-    )
-    master_reads = dict(zip(months, read_results[: len(months)]))
-    datalens_reads = dict(zip(months, read_results[len(months) :]))
-    _log("monthly files read")
-
-    # 2. Для месяцев, у которых ещё нет отдельного файла, один раз (не по
-    # разу на месяц) подтягиваем legacy-архив и режем его по месяцам.
-    needs_legacy = any(master_reads[m][0] is None for m in months) or any(
-        datalens_reads[m][0] is None for m in months
-    )
-    _log(f"needs_legacy={needs_legacy}")
-    if needs_legacy:
+    # Легаси-архив подтягиваем не по разу на месяц, а максимум один раз за
+    # весь запрос — но только если хотя бы для одного из месяцев ещё нет
+    # своего файла (дешёвый список файлов в директории вместо полного чтения
+    # каждого месячного файла).
+    from app.core import github_storage
+    existing_master_months = {
+        p.rsplit("/", 1)[-1].removesuffix(".csv")
+        for p in await asyncio.to_thread(github_storage.list_files, MASTER_DIR)
+    }
+    if any(m not in existing_master_months for m in months):
         legacy_master, legacy_datalens = await asyncio.gather(
             asyncio.to_thread(_load_legacy_master),
             asyncio.to_thread(_load_legacy_datalens),
         )
         _log(f"legacy archive read (master {len(legacy_master)} строк, datalens {len(legacy_datalens)} строк)")
     else:
-        legacy_master = None
-        legacy_datalens = None
+        legacy_master, legacy_datalens = None, None
+        _log("legacy archive skipped (every month already has its own file)")
 
-    # 3. Собираем существующие данные по каждому месяцу (из месячного файла
-    # либо из среза legacy-архива) и мёржим с новой загрузкой.
-    write_tasks = []
     commit_message = f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)"
 
-    for m in months:
-        df_new_month = df_new[df_new["_month"] == m].drop(columns=["_month"])
-
-        master_content, master_sha = master_reads[m]
-        if master_content is not None:
-            df_master_existing = pd.read_csv(StringIO(master_content))
-            if not df_master_existing.empty:
-                df_master_existing["date"] = pd.to_datetime(df_master_existing["date"])
-        elif legacy_master is not None and not legacy_master.empty:
-            month_mask = legacy_master["date"].apply(_month_key) == m
-            df_master_existing = legacy_master[month_mask].reset_index(drop=True)
-        else:
-            df_master_existing = empty_master()
-
-        datalens_content, datalens_sha = datalens_reads[m]
-        if datalens_content is not None:
-            df_datalens_existing = pd.read_csv(StringIO(datalens_content))
-        elif legacy_datalens is not None and not legacy_datalens.empty:
-            month_mask = legacy_datalens["date"].astype(str).str.startswith(m)
-            df_datalens_existing = legacy_datalens[month_mask].reset_index(drop=True)
-        else:
-            df_datalens_existing = pd.DataFrame(columns=DATALENS_COLUMNS)
-
-        combined_master = merge_with_master(df_master_existing, df_new_month)
-        combined_datalens = _merge_datalens(df_datalens_existing, df_new_month)
-
-        write_tasks.append(asyncio.to_thread(
-            github_storage.write_file,
-            master_paths[m], combined_master.to_csv(index=False), commit_message, master_sha,
-        ))
-        write_tasks.append(asyncio.to_thread(
-            github_storage.write_file,
-            datalens_paths[m], combined_datalens.to_csv(index=False), commit_message, datalens_sha,
-        ))
-
-    await asyncio.gather(*write_tasks)
+    await asyncio.gather(*[
+        asyncio.to_thread(
+            _process_month_sync,
+            m,
+            df_new[df_new["_month"] == m].drop(columns=["_month"]),
+            commit_message,
+            legacy_master,
+            legacy_datalens,
+        )
+        for m in months
+    ])
+    _log("all months written")
 
     months_str = ", ".join(months)
     return {"added": len(df_new), "months": months_str}
