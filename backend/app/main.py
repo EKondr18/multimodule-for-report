@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.modules.baggage_comments.router import router as baggage_comments_router
@@ -24,6 +24,28 @@ app.include_router(month_report_router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/api/health/echo-json")
+async def health_echo_json(payload: dict):
+    """Диагностика: простой POST с JSON-телом, без файлов и без multipart —
+    проверяет, доходит ли вообще POST-запрос с телом до кода, если это не
+    file-upload. GitHub API здесь не вызывается ни разу."""
+    print(f"[health/echo-json] received: {payload}", flush=True)
+    return {"status": "ok", "received": payload}
+
+
+@app.post("/api/health/echo-file")
+async def health_echo_file(file: UploadFile):
+    """Диагностика: минимальный file-upload эндпоинт (multipart/form-data),
+    без какой-либо бизнес-логики и без обращений к GitHub — изолирует,
+    зависает ли сам приём/разбор multipart-тела на этом хостинге."""
+    import time
+
+    t0 = time.perf_counter()
+    raw = await file.read()
+    print(f"[health/echo-file] received {len(raw)} bytes in {time.perf_counter() - t0:.2f}s", flush=True)
+    return {"status": "ok", "size": len(raw)}
 
 
 @app.get("/api/health/github")
