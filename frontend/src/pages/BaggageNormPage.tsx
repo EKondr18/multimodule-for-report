@@ -1,42 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import FileUpload from "../components/FileUpload";
-import FilterableTable from "../components/FilterableTable";
-import { BaggageRow, downloadDatalensCsv, fetchCurrent, uploadWeeklyFile } from "../api/baggageNorm";
-
-const COLUMNS = [
-  { key: "date", label: "Дата" },
-  { key: "company", label: "Авиакомпания" },
-  { key: "bag_status", label: "Статус выдачи" },
-  { key: "flight", label: "Рейс" },
-];
+import { downloadDatalensCsv, uploadWeeklyFile } from "../api/baggageNorm";
 
 export default function BaggageNormPage() {
-  const [rows, setRows] = useState<BaggageRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [previewDays, setPreviewDays] = useState(30);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchCurrent(controller.signal)
-      .then((data) => {
-        setRows(data.rows);
-        setTotal(data.total);
-        setPreviewDays(data.preview_days);
-      })
-      .catch((e) => {
-        if (e.name !== "AbortError") setError(e.message);
-      });
-    // Отменяем запрос при уходе со вкладки — иначе он продолжает висеть в
-    // фоне (архив читается из GitHub и может занимать много времени) и на
-    // Vercel способен утащить с собой другие параллельные запросы, когда
-    // соединение обрывается по таймауту.
-    return () => controller.abort();
-  }, []);
 
   const handleFile = async (file: File) => {
     setLoading(true);
@@ -44,9 +15,6 @@ export default function BaggageNormPage() {
     setMessage(null);
     try {
       const result = await uploadWeeklyFile(file);
-      setRows(result.rows);
-      setTotal(result.total);
-      setPreviewDays(result.preview_days);
       setMessage(`Добавлено ${result.added} строк, всего в архиве ${result.total}.`);
     } catch (e) {
       setError((e as Error).message);
@@ -69,7 +37,7 @@ export default function BaggageNormPage() {
 
       <div className="card">
         <h3>2. Итоговый файл для DataLens</h3>
-        <button className="btn" onClick={() => downloadDatalensCsv()} disabled={total === 0}>
+        <button className="btn" onClick={() => downloadDatalensCsv()}>
           Скачать csv (весь архив)
         </button>
 
@@ -87,19 +55,11 @@ export default function BaggageNormPage() {
             <button
               className="btn"
               onClick={() => downloadDatalensCsv(startDate || undefined, endDate || undefined)}
-              disabled={total === 0 || (!startDate && !endDate)}
+              disabled={!startDate && !endDate}
             >
               Скачать csv за период
             </button>
           </div>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <div className="status-msg">
-            Показаны последние {previewDays} дней ({rows.length} строк). Всего в архиве {total} строк —
-            для полного периода используйте скачивание csv выше.
-          </div>
-          <FilterableTable columns={COLUMNS} rows={rows as unknown as Record<string, string>[]} />
         </div>
       </div>
     </div>

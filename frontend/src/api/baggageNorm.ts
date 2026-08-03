@@ -1,28 +1,8 @@
 import { apiUrl, parseErrorOrJson } from "./base";
 
-export interface BaggageRow {
-  date: string;
-  company: string;
-  bag_status: string;
-  flight: string;
-}
-
 interface ProcessResponse {
-  rows: BaggageRow[];
   added: number;
   total: number;
-  preview_days: number;
-}
-
-export interface CurrentResponse {
-  rows: BaggageRow[];
-  total: number;
-  preview_days: number;
-}
-
-export async function fetchCurrent(signal?: AbortSignal): Promise<CurrentResponse> {
-  const res = await fetch(apiUrl("/api/baggage-norm/current"), { signal });
-  return parseErrorOrJson<CurrentResponse>(res);
 }
 
 export async function uploadWeeklyFile(file: File): Promise<ProcessResponse> {
