@@ -21,10 +21,10 @@
 
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 from typing import BinaryIO
 
 import pandas as pd
+from rapidfuzz.fuzz import ratio as fuzz_ratio
 
 VIOLATIONS_SHEET = "ТАБЛИЦА"
 APPEALS_SHEET = "Экспорт"
@@ -894,10 +894,24 @@ def _normalize_employee(name: str) -> str:
 
 
 def _group_employees(counts: "pd.Series[int]", threshold: float = 0.85) -> dict[str, str]:
-    """Union-find fuzzy grouping of employee names. Returns raw_name → canonical_name."""
+    """Union-find fuzzy grouping of employee names. Returns raw_name → canonical_name.
+
+    Naively this is O(n²) SequenceMatcher calls over all unique names — with
+    ~1000+ distinct names (real perron files) that's ~500k comparisons and
+    several seconds by itself. SequenceMatcher.ratio() for two strings of
+    length len1 <= len2 can be at most 2*len1/(len1+len2) (its matched-block
+    count can't exceed the shorter string's length), so for ratio >= threshold
+    to be even possible, len2/len1 <= (2-threshold)/threshold. Sorting by
+    normalized length and only comparing each name against others within that
+    bound (a classic length-blocking technique) skips pairs that mathematically
+    cannot reach the threshold — same result, far fewer SequenceMatcher calls."""
     unique = list(counts.index)
     n = len(unique)
     parent = list(range(n))
+    normalized = [_normalize_employee(u) for u in unique]
+
+    order = sorted(range(n), key=lambda i: len(normalized[i]))
+    max_len_ratio = (2 - threshold) / threshold if threshold > 0 else float("inf")
 
     def find(i: int) -> int:
         while parent[i] != i:
@@ -913,13 +927,18 @@ def _group_employees(counts: "pd.Series[int]", threshold: float = 0.85) -> dict[
             else:
                 parent[ri] = rj
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            if SequenceMatcher(
-                None,
-                _normalize_employee(unique[i]),
-                _normalize_employee(unique[j]),
-            ).ratio() >= threshold:
+    score_cutoff = threshold * 100
+    for a in range(n):
+        i = order[a]
+        len_i = len(normalized[i])
+        if len_i == 0:
+            continue
+        for b in range(a + 1, n):
+            j = order[b]
+            len_j = len(normalized[j])
+            if len_j > len_i * max_len_ratio:
+                break
+            if fuzz_ratio(normalized[i], normalized[j], score_cutoff=score_cutoff) >= score_cutoff:
                 union(i, j)
 
     return {unique[i]: unique[find(i)] for i in range(n)}
