@@ -3,6 +3,7 @@ import BaggageCommentsPage from "./pages/BaggageCommentsPage";
 import BaggageNormPage from "./pages/BaggageNormPage";
 import KpiPage from "./pages/KpiPage";
 import QualityReportPage from "./pages/QualityReportPage";
+import TechDedupPage from "./pages/TechDedupPage";
 
 export interface TabDefinition {
   id: string;
@@ -16,4 +17,5 @@ export const TABS: TabDefinition[] = [
   { id: "baggage-comments", label: "Добавление комментариев по багажу", Component: BaggageCommentsPage },
   { id: "quality-report", label: "Отчёт по качеству", Component: QualityReportPage },
   { id: "kpi", label: "KPI", Component: KpiPage },
+  { id: "tech-dedup", label: "Удаление дубликатов по обслуживанию техники", Component: TechDedupPage },
 ];
