@@ -1,10 +1,9 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
-import { downloadBlob, processTechDedup } from "../api/techDedup";
+import { downloadBlob, removeDuplicates } from "../lib/techDedup";
 
 export default function TechDedupPage() {
   const [loading, setLoading] = useState(false);
-  const [waking, setWaking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,7 +12,7 @@ export default function TechDedupPage() {
     setError(null);
     setMessage(null);
     try {
-      const result = await processTechDedup(file, setWaking);
+      const result = await removeDuplicates(file);
       downloadBlob(result.blob, result.filename);
       setMessage(
         `Было строк: ${result.initialRows}. Осталось: ${result.finalRows}. ` +
@@ -23,7 +22,6 @@ export default function TechDedupPage() {
       setError((e as Error).message);
     } finally {
       setLoading(false);
-      setWaking(false);
     }
   };
 
@@ -34,8 +32,7 @@ export default function TechDedupPage() {
       <div className="card">
         <h3>1. Загрузить выгрузку по обслуживанию техники (xlsx)</h3>
         <FileUpload onFile={handleFile} disabled={loading} />
-        {waking && <div className="status-msg">Сервер просыпается, подождите…</div>}
-        {loading && !waking && <div className="status-msg">Обработка файла…</div>}
+        {loading && <div className="status-msg">Обработка файла…</div>}
         {message && <div className="status-msg">{message}</div>}
         {error && <div className="status-msg error">{error}</div>}
       </div>

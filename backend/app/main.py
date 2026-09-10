@@ -5,7 +5,6 @@ from app.modules.baggage_comments.router import router as baggage_comments_route
 from app.modules.baggage_norm.router import router as baggage_norm_router
 from app.modules.month_report.router import router as month_report_router
 from app.modules.quality_report.router import router as quality_report_router
-from app.modules.tech_dedup.router import router as tech_dedup_router
 
 app = FastAPI(title="Отчёты — мультимодульное приложение")
 
@@ -20,7 +19,6 @@ app.include_router(baggage_norm_router)
 app.include_router(baggage_comments_router)
 app.include_router(quality_report_router)
 app.include_router(month_report_router)
-app.include_router(tech_dedup_router)
 
 
 @app.get("/api/health")
