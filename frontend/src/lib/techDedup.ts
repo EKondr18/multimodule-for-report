@@ -19,6 +19,7 @@
 // однозначен, такой проблемы не создаёт.
 
 import * as XLSX from "xlsx";
+import { unzipSync, zipSync } from "fflate";
 
 const ORDER_COLUMN = "Заказ-наряд";
 
@@ -232,21 +233,24 @@ export async function removeDuplicates(file: File): Promise<TechDedupResult> {
 
   const outWorkbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(outWorkbook, outSheet, sheetName);
-  // compression:true обязателен — без него SheetJS пишет несжатый xlsx
-  // (это ZIP-контейнер, но без DEFLATE), из-за чего файл может раздуться
-  // в 5-10 раз по сравнению с исходником (именно это увидел пользователь:
-  // 11 МБ на входе стали 115 МБ на выходе).
-  const outArray = XLSX.write(outWorkbook, {
+  // compression:false + пережимаем сами через fflate ниже. SheetJS'овский
+  // встроенный компрессор (compression:true) сильно уступает нормальному
+  // DEFLATE — на реальном файле он давал ~27 МБ вместо ~10 МБ у fflate на
+  // тех же данных (для сравнения: без сжатия вообще выходило ~120 МБ на
+  // 11-мегабайтном исходнике — это и увидел пользователь). bookSST — пишет
+  // общий список уникальных строк (sharedStrings.xml) со ссылками из ячеек,
+  // как в исходном файле, вместо inline-строк в каждой ячейке напрямую —
+  // при сотнях тысяч повторяющихся текстовых значений (модели авто, статусы
+  // и т.п.) это резко уменьшает несжатый размер, который потом жмёт fflate.
+  const rawZip = XLSX.write(outWorkbook, {
     bookType: "xlsx",
     type: "array",
-    compression: true,
-    // bookSST — пишет общий список уникальных строк (sharedStrings.xml) со
-    // ссылками из ячеек, как в исходном файле, вместо inline-строк в каждой
-    // ячейке напрямую — при сотнях тысяч повторяющихся текстовых значений
-    // (модели авто, статусы и т.п.) это резко уменьшает размер файла.
+    compression: false,
     bookSST: true,
   }) as ArrayBuffer;
-  const blob = new Blob([outArray], {
+  const zipEntries = unzipSync(new Uint8Array(rawZip));
+  const recompressed = zipSync(zipEntries, { level: 9 });
+  const blob = new Blob([recompressed], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
 
