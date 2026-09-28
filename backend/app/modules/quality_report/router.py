@@ -1,6 +1,10 @@
+import asyncio
+import hashlib
 from io import BytesIO
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+
+from app.core.request_cache import dedup
 
 router = APIRouter(prefix="/api/quality-report", tags=["quality-report"])
 
@@ -10,17 +14,21 @@ def _check_excel_filename(file: UploadFile, label: str) -> None:
         raise HTTPException(400, f"«{label}» — ожидается excel-файл")
 
 
-@router.post("/summary")
-async def quality_summary(
-    perron_file: UploadFile | None = File(None),
-    avk_file: UploadFile | None = File(None),
-    grh_file: UploadFile | None = File(None),
-    lir_file: UploadFile | None = File(None),
-    pab_file: UploadFile | None = File(None),
-    start_date: str = Form(...),
-    end_date: str = Form(...),
-    granularity: str = Form(...),
-):
+def _build_summary(
+    perron_bytes: bytes | None,
+    avk_bytes: bytes | None,
+    grh_bytes: bytes | None,
+    lir_bytes: bytes | None,
+    pab_bytes: bytes | None,
+    start_date: str,
+    end_date: str,
+    granularity: str,
+) -> dict:
+    """Синхронная (блокирующая) часть — весь pandas-разбор и построение
+    таблиц. Вызывается через asyncio.to_thread, чтобы не блокировать event
+    loop на время расчёта — иначе повторная попытка (см. fetchWithWakeup на
+    фронтенде) не смогла бы попасть в dedup() и дождаться результата первой
+    попытки, а встала бы в очередь позади неё."""
     import pandas as pd
     from app.modules.quality_report.processing import (
         FO_SIZ_CHECKS_SHEET,
@@ -59,27 +67,20 @@ async def quality_summary(
     df_pab_baggage = None
 
     try:
-        if perron_file is not None and perron_file.filename:
-            _check_excel_filename(perron_file, "Нарушения на перроне")
-            df_perron = read_violations_file(BytesIO(await perron_file.read()))
-        if avk_file is not None and avk_file.filename:
-            _check_excel_filename(avk_file, "Нарушения в АВК")
-            df_avk = read_violations_file(BytesIO(await avk_file.read()))
-        if grh_file is not None and grh_file.filename:
-            _check_excel_filename(grh_file, "Проверки GRH")
-            grh_raw = await grh_file.read()
+        if perron_bytes is not None:
+            df_perron = read_violations_file(BytesIO(perron_bytes))
+        if avk_bytes is not None:
+            df_avk = read_violations_file(BytesIO(avk_bytes))
+        if grh_bytes is not None:
             # Одна книга парсится один раз, а не по разу на каждый лист —
             # раньше pd.ExcelFile(...) пересобирался с нуля для каждого листа.
-            grh_xl = pd.ExcelFile(BytesIO(grh_raw))
+            grh_xl = pd.ExcelFile(BytesIO(grh_bytes))
             df_grh_rpo = read_grh_checks_sheet(grh_xl, RPO_CHECKS_SHEET)
             df_grh_fo_siz = read_grh_checks_sheet(grh_xl, FO_SIZ_CHECKS_SHEET)
-        if lir_file is not None and lir_file.filename:
-            _check_excel_filename(lir_file, "Мониторинг LIR/СЗВ")
-            df_lir = read_lir_szv_file(BytesIO(await lir_file.read()))
-        if pab_file is not None and pab_file.filename:
-            _check_excel_filename(pab_file, "Проверки PAB")
-            pab_raw = await pab_file.read()
-            pab_xl = pd.ExcelFile(BytesIO(pab_raw))
+        if lir_bytes is not None:
+            df_lir = read_lir_szv_file(BytesIO(lir_bytes))
+        if pab_bytes is not None:
+            pab_xl = pd.ExcelFile(BytesIO(pab_bytes))
             df_pab_fo_ethics = read_pab_checks_sheet(pab_xl, PAB_FO_ETHICS_SHEET)
             df_pab_rk = read_pab_checks_sheet(pab_xl, PAB_RK_SHEET)
             df_pab_pt = read_pab_checks_sheet(pab_xl, PAB_PT_SHEET)
@@ -104,3 +105,64 @@ async def quality_summary(
         granularity,
     )
     return {"tables": tables}
+
+
+@router.post("/summary")
+async def quality_summary(
+    perron_file: UploadFile | None = File(None),
+    avk_file: UploadFile | None = File(None),
+    grh_file: UploadFile | None = File(None),
+    lir_file: UploadFile | None = File(None),
+    pab_file: UploadFile | None = File(None),
+    start_date: str = Form(...),
+    end_date: str = Form(...),
+    granularity: str = Form(...),
+):
+    perron_bytes = None
+    avk_bytes = None
+    grh_bytes = None
+    lir_bytes = None
+    pab_bytes = None
+
+    if perron_file is not None and perron_file.filename:
+        _check_excel_filename(perron_file, "Нарушения на перроне")
+        perron_bytes = await perron_file.read()
+    if avk_file is not None and avk_file.filename:
+        _check_excel_filename(avk_file, "Нарушения в АВК")
+        avk_bytes = await avk_file.read()
+    if grh_file is not None and grh_file.filename:
+        _check_excel_filename(grh_file, "Проверки GRH")
+        grh_bytes = await grh_file.read()
+    if lir_file is not None and lir_file.filename:
+        _check_excel_filename(lir_file, "Мониторинг LIR/СЗВ")
+        lir_bytes = await lir_file.read()
+    if pab_file is not None and pab_file.filename:
+        _check_excel_filename(pab_file, "Проверки PAB")
+        pab_bytes = await pab_file.read()
+
+    # Дедупликация: fetchWithWakeup на фронтенде при обрыве соединения
+    # повторяет тот же запрос (те же файлы, те же параметры) до 10 раз
+    # подряд. Без этого каждая повторная попытка запускала бы тот же
+    # тяжёлый разбор+сравнение заново, не давая предыдущей попытке
+    # спокойно доработать — см. app/core/request_cache.py.
+    hasher = hashlib.sha256()
+    for chunk in (perron_bytes, avk_bytes, grh_bytes, lir_bytes, pab_bytes):
+        hasher.update(b"\0" if chunk is None else chunk)
+        hasher.update(b"|")
+    hasher.update(f"{start_date}|{end_date}|{granularity}".encode())
+    cache_key = hasher.hexdigest()
+
+    async def compute() -> dict:
+        return await asyncio.to_thread(
+            _build_summary,
+            perron_bytes,
+            avk_bytes,
+            grh_bytes,
+            lir_bytes,
+            pab_bytes,
+            start_date,
+            end_date,
+            granularity,
+        )
+
+    return await dedup(cache_key, compute)
