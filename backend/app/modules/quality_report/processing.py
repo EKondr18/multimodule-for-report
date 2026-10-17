@@ -124,6 +124,24 @@ PAB_BAGGAGE_SHEET = "Оформление багажа"
 NOT_UPLOADED = "Файл не загружен"
 
 
+_ISO_DATE_RE = re.compile(r"^\s*\d{4}-\d{2}-\d{2}")
+
+
+def _parse_date_dayfirst_safe(series: pd.Series) -> pd.Series:
+    """pd.to_datetime(..., dayfirst=True) нужен для дат вида «05.01.2026»,
+    но ломает уже однозначные ISO-строки («2026-01-05» -> «2026-05-01», а
+    «2026-01-20» — в NaT, т.к. 20-го месяца не бывает): dayfirst переставляет
+    день/месяц местами даже там, где это не нужно. Тот же класс бага уже
+    встречался в выгрузках DataExport (см. frontend-модуль tech-dedup).
+    Строки, похожие на ISO (ГГГГ-ММ-ДД...), парсим без dayfirst; остальное —
+    как раньше, с dayfirst=True."""
+    is_iso = series.astype(str).str.match(_ISO_DATE_RE)
+    result = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    if is_iso.any():
+        result = result.where(~is_iso, pd.to_datetime(series, errors="coerce", dayfirst=False))
+    return result
+
+
 def _find_column(columns: list[str], name: str) -> str | None:
     name = name.strip().lower()
     for col in columns:
@@ -374,7 +392,7 @@ def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
         rename[flight_col] = "flight"
 
     result = df[keep].rename(columns=rename)
-    result["date"] = pd.to_datetime(result["date"], errors="coerce", dayfirst=True)
+    result["date"] = _parse_date_dayfirst_safe(result["date"])
     result = result.dropna(subset=["date"])
 
     result["agent_raw"] = result["agent_raw"].apply(_clean_agent_name)

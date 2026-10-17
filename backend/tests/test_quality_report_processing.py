@@ -98,18 +98,18 @@ def test_lir_reader_canonicalizes_agents_and_flags_violations():
     assert df["has_violation"].tolist() == [False, True, True, False, True]
 
 
-def test_lir_iso_string_dates_are_day_first_swapped():
-    # FLAG (for human review): read_lir_szv_file парсит даты с dayfirst=True.
-    # Если в выгрузке даты хранятся текстом в ISO-виде («2026-01-05»), месяц и
-    # день меняются местами («2026-05-01»), а даты с днём > 12 («2026-01-20»)
-    # становятся NaT и теряются. Реальные excel-даты (не текст) не затронуты.
+def test_lir_iso_string_dates_are_parsed_correctly():
+    # read_lir_szv_file парсит ISO-строки («2026-01-05») без перестановки
+    # дня/месяца — _parse_date_dayfirst_safe распознаёт однозначный ISO-вид
+    # и не применяет к нему dayfirst=True (который нужен только для дат
+    # вида «05.01.2026»). Реальные excel-даты (не текст) не затронуты.
     iso = pd.DataFrame({
         "Дата": ["2026-01-05", "2026-01-20"],
         "ФИО Агента": ["Иванов", "Иванов"],
         "Описание причины замечания": ["Нарушение", "Нарушение"],
     })
     df = qr.read_lir_szv_file(BytesIO(make_xlsx({"LIR СЗВ 2026": iso})))
-    assert df["date"].tolist() == [T("2026-05-01")]
+    assert df["date"].tolist() == [T("2026-01-05"), T("2026-01-20")]
 
 
 def test_lir_empty_reason_does_not_count_as_violation():
