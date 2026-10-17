@@ -3,6 +3,15 @@
 // и запросы идут на тот же origin через прокси из vite.config.ts.
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
+// Общий секрет, отсекающий ботов/скан(н)еры, дёргающие публичный URL
+// Render напрямую, минуя сайт (см. backend/app/core/shared_secret.py).
+// Это НЕ настоящая аутентификация — значение попадает в клиентский бандл
+// и видно в devtools любому, кто открыл легитимный сайт. Если переменная
+// не задана, заголовок просто не добавляется — backend тогда тоже не
+// требует его (no-op), так что это безопасно для локальной разработки.
+const APP_SHARED_SECRET = import.meta.env.VITE_APP_SHARED_SECRET ?? "";
+const SHARED_SECRET_HEADER = "X-App-Secret";
+
 export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
@@ -36,10 +45,16 @@ export async function fetchWithWakeup(
   init?: RequestInit,
   onWaking?: (waking: boolean) => void
 ): Promise<Response> {
+  // Общий для всех модулей fetch-хелпер — добавляя заголовок здесь, а не
+  // в каждом api/*.ts, покрываем все вызовы автоматически.
+  const headers = new Headers(init?.headers);
+  if (APP_SHARED_SECRET) headers.set(SHARED_SECRET_HEADER, APP_SHARED_SECRET);
+  const initWithSecret: RequestInit = { ...init, headers };
+
   let sawFailure = false;
   for (let attempt = 0; ; attempt++) {
     try {
-      const res = await fetch(input, init);
+      const res = await fetch(input, initWithSecret);
       if (isGatewayStatus(res.status) && attempt < WAKEUP_RETRY_DELAYS_MS.length) {
         throw new Error(`gateway ${res.status}`);
       }

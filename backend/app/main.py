@@ -1,6 +1,8 @@
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.core.shared_secret import HEADER_NAME, is_exempt, is_valid
 from app.modules.baggage_comments.router import router as baggage_comments_router
 from app.modules.baggage_norm.router import router as baggage_norm_router
 from app.modules.month_report.router import router as month_report_router
@@ -14,6 +16,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def shared_secret_middleware(request: Request, call_next):
+    """Боты/скан(н)еры, нашедшие публичный URL Render, не проходят через
+    фронтенд и не знают заголовка X-App-Secret — см.
+    app/core/shared_secret.py. Не настоящая аутентификация, а именно
+    отсечение такого трафика; /api/health* исключён, чтобы keep-alive
+    cron-пинги (без заголовка) продолжали работать."""
+    if is_exempt(request.url.path):
+        return await call_next(request)
+    if not is_valid(request.headers.get(HEADER_NAME)):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
 
 app.include_router(baggage_norm_router)
 app.include_router(baggage_comments_router)

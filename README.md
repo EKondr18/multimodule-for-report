@@ -288,6 +288,7 @@ docker compose up --build
 | `GITHUB_TOKEN` | токен с правом записи в репозиторий (обязателен) | — |
 | `GITHUB_REPO` | `owner/repo`, куда писать данные | `EKondr18/multimodule-for-report` |
 | `GITHUB_BRANCH` | ветка для коммитов с данными | `main` |
+| `APP_SHARED_SECRET` | общий секрет с фронтендом, отсекающий ботов (см. ниже) | не задан — проверка выключена |
 
 ## Разработка без Docker
 
@@ -300,25 +301,39 @@ uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-## Деплой на Vercel (два отдельных проекта)
+## Деплой (backend — Render, frontend — Vercel)
 
-**Backend** (`backend/`):
-1. New Project → импортировать этот репозиторий → **Root Directory** = `backend`.
-2. Vercel сам распознает `api/index.py` (serverless-функция, экспортирует FastAPI-приложение)
-   и `vercel.json` (роутит все пути в эту функцию — маршрутизацией внутри занимается FastAPI).
-3. Settings → Environment Variables → добавить `GITHUB_TOKEN`, `GITHUB_REPO`, `GITHUB_BRANCH`.
-4. Deploy. Получите URL вида `https://<backend-project>.vercel.app`.
+**Backend** (`backend/`), Render (always-on, не serverless — см. «Известное
+ограничение» ниже):
+1. New Web Service → импортировать этот репозиторий → Root Directory = `backend`,
+   билд через `backend/Dockerfile` (`uvicorn app.main:app`, см. Dockerfile).
+2. Environment → добавить `GITHUB_TOKEN`, `GITHUB_REPO`, `GITHUB_BRANCH` и
+   `APP_SHARED_SECRET` (случайная строка — общий секрет с фронтендом, см. ниже).
+3. Deploy. Получите URL вида `https://<backend-project>.onrender.com`.
 
-**Frontend** (`frontend/`):
+**Frontend** (`frontend/`), Vercel:
 1. New Project → тот же репозиторий → **Root Directory** = `frontend`.
 2. Framework Preset — Vite (определится автоматически).
-3. Settings → Environment Variables → `VITE_API_BASE_URL` = URL backend-проекта из шага выше
-   (без слэша на конце, например `https://reports-backend.vercel.app`).
+3. Settings → Environment Variables →
+   - `VITE_API_BASE_URL` = URL backend-сервиса из шага выше (без слэша на конце,
+     например `https://reports-backend.onrender.com`);
+   - `VITE_APP_SHARED_SECRET` = то же значение, что `APP_SHARED_SECRET` на Render.
 4. Deploy.
 
 Локально `VITE_API_BASE_URL` не нужен — Vite dev-сервер проксирует `/api/*` на
 `http://localhost:8000` (см. `vite.config.ts`), это покрывает запуск через
 `docker compose` или `npm run dev`.
+
+### Общий секрет фронтенд↔бэкенд (`APP_SHARED_SECRET` / `VITE_APP_SHARED_SECRET`)
+
+Нужен только для того, чтобы отсечь ботов и скан(н)еры, которые находят
+публичный URL Render и дёргают API напрямую, минуя сайт — **это не настоящая
+аутентификация**: значение попадает в клиентский JS-бандл и видно в devtools
+любому, кто открыл легитимный сайт. Бэкенд сверяет заголовок `X-App-Secret` с
+`APP_SHARED_SECRET` (см. `backend/app/core/shared_secret.py`); если переменная
+не задана ни на Render, ни на Vercel — проверка просто отключена (no-op),
+приложение работает как раньше. `/api/health*` исключён из проверки, чтобы
+keep-alive cron продолжал пинговать без заголовка.
 
 ## Известное ограничение
 
