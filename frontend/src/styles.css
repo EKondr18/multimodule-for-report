@@ -378,15 +378,65 @@ select:focus {
 }
 
 /* ── Tables ────────────────────────────────────────────────────────────────── */
-table.preview {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
+
+/* Scroll wrapper for each table: handles both the horizontal scroll for
+   wide tables (so they scroll within their own box instead of breaking the
+   page layout — important at phone widths) and the vertical scroll the
+   sticky <thead> below sticks to.
+   NOTE: setting only `overflow-x: auto` here would be a bug — per the CSS
+   Overflow spec, a non-visible value on one axis forces the other axis's
+   *computed* value to `auto` too, even if you write `overflow-y: visible`
+   explicitly. That silently turns this element into its own scroll
+   container without ever actually scrolling (the page does), and any
+   `position: sticky` child confines itself to that non-scrolling box
+   instead of sticking to the viewport — the header appears to just
+   scroll away. Giving it an explicit bounded `max-height` makes it a real,
+   independently-scrolling box so the sticky header has somewhere to stick. */
+.table-scroll {
+  overflow: auto;
+  max-width: 100%;
+  max-height: 70vh;
   border-radius: var(--radius);
-  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
+table.preview {
+  width: 100%;
+  /* `border-collapse: collapse` breaks `position: sticky` on <th>/<td> in
+     Chromium and other engines (a well-known, long-standing interaction) —
+     cells report `position: sticky` in computed style but never actually
+     stick. `separate` with zero spacing keeps the same visual borders
+     (only border-bottom is used, no doubled vertical lines) while letting
+     the sticky header actually work. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  /* NOTE: no `overflow: hidden`/`border-radius` here on purpose. Either one
+     on the <table> itself turns the table into the nearest ancestor
+     "scroll container" for its sticky <th> cells — ahead of the actual
+     scrolling box, `.table-scroll` just outside it — so the header sticks
+     relative to the (non-scrolling) table and never visibly moves. The
+     rounded corners are handled by `.table-scroll` instead, which both
+     clips (via its own `overflow: auto`) and sits correctly outside the
+     sticky containing block. */
+}
+
+/* Sticky header.
+   NOTE: `position: sticky` on a <thead> (or a <tr>) is unreliable across
+   browsers once the table has `border-collapse: collapse` (ours does, a
+   few lines up) — some engines silently fail to stick the whole header
+   group. Sticking each <th> individually is the version that is broadly
+   supported, so that's what we do here. Every header cell needs its own
+   opaque background (so body rows don't show through while scrolling) and
+   a z-index above the zebra-striped/hover row backgrounds below it.
+   FilterableTable has a second header row (column filters); only the
+   column-label row is stuck to the very top — the filter row scrolls away
+   with the body, which keeps this simple and avoids hand-tuning a second
+   sticky `top` offset to match a header-row height that can vary. */
 table.preview thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: #f8fafc;
   color: var(--text-secondary);
   font-size: 11.5px;
@@ -397,6 +447,13 @@ table.preview thead th {
   border-bottom: 2px solid var(--border);
   white-space: nowrap;
   text-align: left;
+}
+
+table.preview thead tr.filters th {
+  position: static;
+  background: #ffffff;
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--border);
 }
 
 table.preview tbody tr {
@@ -466,6 +523,66 @@ table.preview thead tr.filters select:focus {
   color: var(--text-primary);
 }
 
+/* Group of per-table action buttons (Копировать / Экспорт в Excel). */
+.table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Outlier highlighting ──────────────────────────────────────────────────── */
+/* Статистический выброс (|z-score| > порога) внутри своего столбца. Это
+   "обратите внимание", не "ошибка" — поэтому мягкий, не тревожный тон. */
+td.cell-outlier {
+  background: rgba(217, 119, 6, .12);
+  box-shadow: inset 3px 0 0 0 rgba(217, 119, 6, .55);
+}
+
+table.preview tbody tr:hover td.cell-outlier {
+  background: rgba(217, 119, 6, .18);
+}
+
+/* ── Loading skeleton ─────────────────────────────────────────────────────── */
+.table-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  padding: 2px;
+}
+
+.table-skeleton-row {
+  display: flex;
+  gap: 10px;
+}
+
+.table-skeleton-cell {
+  flex: 1;
+  height: 16px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #edf1f5 37%, #e2e8f0 63%);
+  background-size: 400% 100%;
+  animation: table-skeleton-shimmer 1.4s ease infinite;
+}
+
+.table-skeleton-head .table-skeleton-cell {
+  height: 12px;
+  background: linear-gradient(90deg, #cbd5e1 25%, #dde4ec 37%, #cbd5e1 63%);
+  background-size: 400% 100%;
+}
+
+@keyframes table-skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-skeleton-cell {
+    animation: none;
+  }
+}
+
 /* ── Pagination ────────────────────────────────────────────────────────────── */
 .pagination {
   display: flex;
@@ -518,4 +635,78 @@ table.preview thead tr.filters select:focus {
   max-width: 340px;
   line-height: 1.6;
   margin: 0;
+}
+
+/* ── Mobile (~phone width) ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .app-shell {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  /* Sidebar becomes a horizontally-scrollable top bar instead of a full-height
+     left column — a fixed 256px column would leave almost no room for content
+     at ~375-420px width. */
+  .tab-nav {
+    width: 100%;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-nav-header {
+    padding: 12px 14px;
+    border-bottom: none;
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+
+  .tab-nav-subtitle {
+    display: none;
+  }
+
+  .tab-nav button {
+    width: auto;
+    white-space: nowrap;
+    padding: 12px 14px;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+
+  .tab-nav button.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-content {
+    padding: 16px;
+    min-width: 0;
+  }
+
+  .card {
+    padding: 14px 16px;
+  }
+
+  .upload-grid,
+  .upload-row-3,
+  .upload-row-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .period-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .summary-table-header {
+    flex-wrap: wrap;
+  }
 }
