@@ -26,7 +26,17 @@ export default function FileUpload({
   return (
     <div
       className={`dropzone${compact ? " dropzone-compact" : ""}${dragOver ? " dragover" : ""}`}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
       onClick={() => !disabled && inputRef.current?.click()}
+      onKeyDown={(e) => {
+        if (disabled) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          inputRef.current?.click();
+        }
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -44,6 +54,7 @@ export default function FileUpload({
         accept={accept}
         hidden
         disabled={disabled}
+        aria-label={label}
         onChange={(e) => handleFiles(e.target.files)}
       />
       {label}
