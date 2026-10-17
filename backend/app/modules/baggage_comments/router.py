@@ -1,7 +1,11 @@
+import asyncio
 import base64
+import hashlib
 from io import BytesIO
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
+
+from app.core.request_cache import dedup
 
 router = APIRouter(prefix="/api/baggage-comments", tags=["baggage-comments"])
 
@@ -14,12 +18,11 @@ def _to_xlsx_base64(df) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-@router.post("/process")
-async def process_files(
-    norm_file: UploadFile,
-    events_file: UploadFile,
-    station: str = Form("vko"),
-):
+def _build_result(norm_bytes: bytes, events_bytes: bytes, station: str) -> dict:
+    """Синхронная (блокирующая) часть — парсинг csv/excel и склейка
+    pandas-таблиц. Вызывается через asyncio.to_thread по тому же принципу,
+    что и в quality_report/router.py — см. комментарий там и в
+    app/core/request_cache.py."""
     from app.modules.baggage_comments.processing import (
         TBS_OUTPUT_COLUMNS,
         merge_comments,
@@ -30,20 +33,10 @@ async def process_files(
         read_tbs_flights_file,
     )
 
-    if station not in SUPPORTED_STATIONS:
-        raise HTTPException(400, f"Обработка для станции {station.upper()} ещё не реализована")
-
     if station == "vko":
-        if not norm_file.filename.lower().endswith(".csv"):
-            raise HTTPException(400, "«Норматив выдачи багажа» — ожидается csv-файл")
-        if not events_file.filename.lower().endswith((".xlsx", ".xls")):
-            raise HTTPException(400, "«События по выдаче» — ожидается excel-файл")
-
-        norm_raw = await norm_file.read()
-        events_raw = await events_file.read()
         try:
-            df_norm = read_norm_file(BytesIO(norm_raw))
-            df_events = read_events_file(BytesIO(events_raw))
+            df_norm = read_norm_file(BytesIO(norm_bytes))
+            df_events = read_events_file(BytesIO(events_bytes))
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
@@ -57,16 +50,9 @@ async def process_files(
         }
 
     # station == "tbs"
-    if not norm_file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "«Рейсы из TBS (прилет)» — ожидается excel-файл")
-    if not events_file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "«События по багажу» — ожидается excel-файл")
-
-    flights_raw = await norm_file.read()
-    events_raw = await events_file.read()
     try:
-        df_flights = read_tbs_flights_file(BytesIO(flights_raw))
-        df_events = read_tbs_events_file(BytesIO(events_raw))
+        df_flights = read_tbs_flights_file(BytesIO(norm_bytes))
+        df_events = read_tbs_events_file(BytesIO(events_bytes))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -84,3 +70,41 @@ async def process_files(
         "totals": totals,
         "xlsx_base64": _to_xlsx_base64(download_rows),
     }
+
+
+@router.post("/process")
+async def process_files(
+    norm_file: UploadFile,
+    events_file: UploadFile,
+    station: str = Form("vko"),
+):
+    if station not in SUPPORTED_STATIONS:
+        raise HTTPException(400, f"Обработка для станции {station.upper()} ещё не реализована")
+
+    if station == "vko":
+        if not norm_file.filename.lower().endswith(".csv"):
+            raise HTTPException(400, "«Норматив выдачи багажа» — ожидается csv-файл")
+        if not events_file.filename.lower().endswith((".xlsx", ".xls")):
+            raise HTTPException(400, "«События по выдаче» — ожидается excel-файл")
+    else:
+        if not norm_file.filename.lower().endswith((".xlsx", ".xls")):
+            raise HTTPException(400, "«Рейсы из TBS (прилет)» — ожидается excel-файл")
+        if not events_file.filename.lower().endswith((".xlsx", ".xls")):
+            raise HTTPException(400, "«События по багажу» — ожидается excel-файл")
+
+    norm_bytes = await norm_file.read()
+    events_bytes = await events_file.read()
+
+    # Дедупликация повторных попыток fetchWithWakeup — см. комментарий в
+    # quality_report/router.py и app/core/request_cache.py.
+    hasher = hashlib.sha256()
+    for chunk in (norm_bytes, events_bytes):
+        hasher.update(chunk)
+        hasher.update(b"|")
+    hasher.update(station.encode())
+    cache_key = hasher.hexdigest()
+
+    async def compute() -> dict:
+        return await asyncio.to_thread(_build_result, norm_bytes, events_bytes, station)
+
+    return await dedup(cache_key, compute)
