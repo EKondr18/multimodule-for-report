@@ -58,7 +58,7 @@ def test_quality_missing_required_form_fields_is_422_validation_error():
 def test_quality_wrong_file_extension_is_400():
     response = client.post(QR, data=QR_DATES, files={"perron_file": ("perron.txt", PERRON_BYTES)})
     _assert_clean_client_error(response, 400)
-    assert "ожидается excel-файл" in response.json()["detail"]
+    assert "ожидается файл формата xlsx/xls" in response.json()["detail"]
 
 
 def test_quality_start_after_end_is_400():
@@ -136,15 +136,15 @@ def test_month_start_after_end_is_400():
     _assert_clean_client_error(response, 400)
 
 
-def test_month_wrong_extension_is_400_but_message_is_double_wrapped():
-    # TODO: should be a clean 400 "«Нарушения на перроне» — ожидается excel-файл",
-    # currently the HTTPException is raised inside the try block and caught by the
-    # generic `except Exception`, so the text becomes "Не удалось разобрать файл: 400: ...".
+def test_month_wrong_extension_is_400_clean_message():
+    # Раньше (до выноса asyncio.to_thread/dedup в этот роутер) HTTPException
+    # из валидации расширения перехватывался общим `except Exception` и
+    # заворачивался второй раз ("Не удалось разобрать файл: 400: ..."). После
+    # рефакторинга роутера сообщение снова чистое — как в quality_report.
     response = client.post(MR, data=MR_DATES, files={"perron_file": ("perron.csv", PERRON_BYTES)})
     _assert_clean_client_error(response, 400)
     detail = response.json()["detail"]
-    assert detail.startswith("Не удалось разобрать файл: 400:")
-    assert "ожидается excel-файл" in detail
+    assert detail == "«Нарушения на перроне» — ожидается файл формата xlsx/xls"
 
 
 @pytest.mark.parametrize("payload", [b"junk", b""])
@@ -200,7 +200,7 @@ def test_baggage_comments_vko_wrong_norm_extension_is_400():
         "events_file": ("e.xlsx", EVENTS_XLSX, XLSX_MIME),
     })
     _assert_clean_client_error(response, 400)
-    assert "csv-файл" in response.json()["detail"]
+    assert "ожидается файл формата csv" in response.json()["detail"]
 
 
 def test_baggage_comments_vko_missing_norm_columns_is_400():
