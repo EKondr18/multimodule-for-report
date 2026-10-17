@@ -65,12 +65,13 @@ def test_uploading_the_same_week_twice_does_not_duplicate_rows(fake_repo):
     assert len(read_csv(fake_repo.text(DATALENS_JAN))) == 2
 
 
-def test_response_reports_upload_size_even_when_nothing_new(fake_repo):
-    # FLAG (for human review): поле "added" — это len(df_new), а не число
-    # реально добавленных строк; повторная загрузка тоже даёт added=2.
+def test_response_reports_actual_new_row_count_not_upload_size(fake_repo):
+    # "added" — число реально новых строк (ключей, которых не было в
+    # архиве), а не размер выгрузки. Повторная загрузка тех же данных
+    # теперь честно даёт added=0.
     upload(WEEK_JAN)
     body = upload(WEEK_JAN).json()
-    assert body == {"added": 2, "months": "2026-01"}
+    assert body == {"added": 0, "months": "2026-01"}
 
 
 # ---------------------------------------------------------------------------

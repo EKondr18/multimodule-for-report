@@ -195,7 +195,10 @@ def merge_with_master(df_master: pd.DataFrame, df_new: pd.DataFrame) -> pd.DataF
 
     untouched = df_master[~in_period_mask]
     in_period = pd.concat([df_master[in_period_mask], df_new], ignore_index=True)
-    in_period = in_period.drop_duplicates(["date", "flight", "mc"])
+    # keep="last": при совпадении ключа (date, flight, mc) побеждает строка
+    # из df_new (она идёт последней в конкатенации) — повторная загрузка с
+    # исправленным значением обновляет архив, а не теряется молча.
+    in_period = in_period.drop_duplicates(["date", "flight", "mc"], keep="last")
 
     combined = pd.concat([untouched, in_period], ignore_index=True)
     combined = combined.sort_values("date").reset_index(drop=True)

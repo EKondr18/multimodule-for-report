@@ -94,7 +94,11 @@ def _process_month_sync(m, df_new_month, commit_message, legacy_master, legacy_d
     несколько одновременных попыток загрузки гонялись за один и тот же
     новый файл (см. баг с пропавшими данными за август при повторных
     попытках после «пробуждения» Render). Теперь при конфликте состояние
-    перечитывается заново и merge повторяется на актуальных данных."""
+    перечитывается заново и merge повторяется на актуальных данных.
+
+    Возвращает число реально новых строк (ключей, которых не было в
+    архиве), добавленных в master.csv этого месяца — строки, обновившие
+    уже существующий ключ (date, flight, mc), в счёт не идут."""
     import pandas as pd
     from github import GithubException
 
@@ -130,6 +134,9 @@ def _process_month_sync(m, df_new_month, commit_message, legacy_master, legacy_d
 
         combined_master = merge_with_master(df_master_existing, df_new_month)
         combined_datalens = _merge_datalens(df_datalens_existing, df_new_month)
+        # Строки, обновившие существующий ключ (date, flight, mc), не
+        # увеличивают число строк архива — остаются только реально новые.
+        new_count = len(combined_master) - len(df_master_existing)
 
         try:
             github_storage.write_file(
@@ -138,7 +145,7 @@ def _process_month_sync(m, df_new_month, commit_message, legacy_master, legacy_d
             github_storage.write_file(
                 datalens_path, combined_datalens.to_csv(index=False), commit_message, datalens_sha,
             )
-            return
+            return new_count
         except GithubException as exc:
             if exc.status in (409, 422) and attempt < max_attempts - 1:
                 continue
@@ -196,7 +203,7 @@ async def process_weekly_file(file: UploadFile):
     commit_message = f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)"
 
     try:
-        await asyncio.gather(*[
+        new_counts = await asyncio.gather(*[
             asyncio.to_thread(
                 _process_month_sync,
                 m,
@@ -223,7 +230,7 @@ async def process_weekly_file(file: UploadFile):
     _log("all months written")
 
     months_str = ", ".join(months)
-    return {"added": len(df_new), "months": months_str}
+    return {"added": sum(new_counts), "months": months_str}
 
 
 @router.get("/download")

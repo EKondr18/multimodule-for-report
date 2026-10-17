@@ -54,14 +54,13 @@ def test_overlapping_week_adds_only_new_keys_and_keeps_sorted_order():
     ]
 
 
-def test_master_row_wins_over_new_row_with_same_key():
-    # FLAG (for human review): при совпадении ключа (date, flight, mc)
-    # drop_duplicates оставляет первую строку — из архива. Новая выгрузка
-    # с исправленным значением молча игнорируется. Фиксируем как есть.
+def test_new_row_updates_master_row_with_same_key():
+    # При совпадении ключа (date, flight, mc) побеждает новая выгрузка —
+    # повторная загрузка с исправленным значением обновляет архив.
     master = _frame([["2026-01-30", "SU2", "B", 2]])
     correction = _frame([["2026-01-30", "SU2", "B", 777]])
     out = bn.merge_with_master(master, correction)
-    assert out["bag_waight"].tolist() == [2]
+    assert out["bag_waight"].tolist() == [777]
 
 
 def test_master_rows_outside_new_period_are_untouched():
