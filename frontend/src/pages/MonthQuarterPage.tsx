@@ -1,6 +1,7 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
 import SummaryTable from "../components/SummaryTable";
+import TableSkeleton from "../components/TableSkeleton";
 import { SummaryTable as SummaryTableData, fetchMonthSummary } from "../api/qualityReport";
 
 export default function MonthQuarterPage() {
@@ -93,6 +94,12 @@ export default function MonthQuarterPage() {
           {loading && <div className="status-msg">Обработка файлов…</div>}
           {error && <div className="status-msg error">{error}</div>}
         </div>
+
+        {loading && tables.length === 0 && (
+          <div style={{ marginTop: 24 }}>
+            <TableSkeleton />
+          </div>
+        )}
 
         {tables.length > 0 && (
           <div style={{ marginTop: 24 }}>

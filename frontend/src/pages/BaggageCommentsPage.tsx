@@ -1,6 +1,7 @@
 import { useState } from "react";
 import FileUpload from "../components/FileUpload";
 import FilterableTable from "../components/FilterableTable";
+import TableSkeleton from "../components/TableSkeleton";
 import {
   CommentRow,
   Station,
@@ -126,6 +127,12 @@ export default function BaggageCommentsPage() {
         {error && <div className="status-msg error">{error}</div>}
       </div>
 
+      {loading && rows.length === 0 && (
+        <div className="card">
+          <TableSkeleton />
+        </div>
+      )}
+
       {rows.length > 0 && (
         <div className="card">
           <h3>3. Результат</h3>
@@ -140,6 +147,7 @@ export default function BaggageCommentsPage() {
               columns={columns}
               rows={rows as unknown as Record<string, string>[]}
               totals={totals}
+              title={`bagazh_kommentarii_${station}`}
             />
           </div>
         </div>
