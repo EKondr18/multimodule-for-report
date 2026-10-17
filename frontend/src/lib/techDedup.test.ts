@@ -38,8 +38,8 @@ function withArrayBuffer(blob: Blob): Blob {
   return blob;
 }
 
-function workbookToBytes(wb: XLSX.WorkBook): Uint8Array {
-  return new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer);
+function workbookToBytes(wb: XLSX.WorkBook): ArrayBuffer {
+  return XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }
 
 /** Входной файл из набора листов: { имя листа: массив строк (первая — заголовок) }. */
@@ -158,7 +158,7 @@ describe("removeDuplicates: шаг 1 — самая свежая дата по �
     expect(result.finalRows).toBe(2);
   });
 
-  it("строка без распознанной даты в группе с датой отбрасывается (FLAG)", async () => {
+  it("FLAG (for human review): строка без распознанной даты в группе с датой отбрасывается", async () => {
     // FLAG (for human review): docstring Python-версии говорит, что группа с «неполной»
     // датой остаётся целиком; но если в группе есть и полная дата, и неполная
     // («от 26.02» без года), строка с неполной датой отбрасывается, т.к. null !== maxDate.
