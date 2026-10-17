@@ -150,6 +150,7 @@ async def process_weekly_file(file: UploadFile):
     import time
 
     from app.core.upload_limits import read_upload_limited
+    from app.core.validation import check_excel_filename
     from app.modules.baggage_norm.processing import read_weekly_excel
 
     t0 = time.perf_counter()
@@ -157,8 +158,7 @@ async def process_weekly_file(file: UploadFile):
     def _log(label: str) -> None:
         print(f"[baggage_norm/process] {label}: {time.perf_counter() - t0:.2f}s", flush=True)
 
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "Ожидается файл Excel (.xlsx/.xls)")
+    check_excel_filename(file, "Выгрузка")
 
     raw = await read_upload_limited(file)
     _log(f"file read from request ({len(raw)/1e6:.2f} MB)")

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from app.core.request_cache import dedup
 from app.core.upload_limits import read_upload_limited
+from app.core.validation import check_excel_filename, check_filename_extension
 
 router = APIRouter(prefix="/api/baggage-comments", tags=["baggage-comments"])
 
@@ -83,15 +84,11 @@ async def process_files(
         raise HTTPException(400, f"Обработка для станции {station.upper()} ещё не реализована")
 
     if station == "vko":
-        if not norm_file.filename.lower().endswith(".csv"):
-            raise HTTPException(400, "«Норматив выдачи багажа» — ожидается csv-файл")
-        if not events_file.filename.lower().endswith((".xlsx", ".xls")):
-            raise HTTPException(400, "«События по выдаче» — ожидается excel-файл")
+        check_filename_extension(norm_file, "Норматив выдачи багажа", (".csv",))
+        check_excel_filename(events_file, "События по выдаче")
     else:
-        if not norm_file.filename.lower().endswith((".xlsx", ".xls")):
-            raise HTTPException(400, "«Рейсы из TBS (прилет)» — ожидается excel-файл")
-        if not events_file.filename.lower().endswith((".xlsx", ".xls")):
-            raise HTTPException(400, "«События по багажу» — ожидается excel-файл")
+        check_excel_filename(norm_file, "Рейсы из TBS (прилет)")
+        check_excel_filename(events_file, "События по багажу")
 
     norm_bytes = await read_upload_limited(norm_file)
     events_bytes = await read_upload_limited(events_file)

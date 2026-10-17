@@ -6,13 +6,9 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.request_cache import dedup
 from app.core.upload_limits import read_upload_limited
+from app.core.validation import check_excel_filename as _check_excel
 
 router = APIRouter(prefix="/api/month-report", tags=["month-report"])
-
-
-def _check_excel(file: UploadFile, label: str) -> None:
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, f"«{label}» — ожидается excel-файл")
 
 
 ALLOWED_GRANULARITIES = {"month", "quarter", "year"}
