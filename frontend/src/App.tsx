@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { TABS } from "./tabs";
 
 export default function App() {
@@ -23,7 +23,9 @@ export default function App() {
         ))}
       </nav>
       <main className="tab-content">
-        <active.Component />
+        <Suspense fallback={<div>Загрузка…</div>}>
+          <active.Component />
+        </Suspense>
       </main>
     </div>
   );

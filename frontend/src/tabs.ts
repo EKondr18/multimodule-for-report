@@ -1,9 +1,13 @@
-import { ComponentType } from "react";
+import { ComponentType, lazy } from "react";
 import BaggageCommentsPage from "./pages/BaggageCommentsPage";
 import BaggageNormPage from "./pages/BaggageNormPage";
 import KpiPage from "./pages/KpiPage";
 import QualityReportPage from "./pages/QualityReportPage";
-import TechDedupPage from "./pages/TechDedupPage";
+
+// Ленивая загрузка: TechDedupPage тянет за собой xlsx + fflate (крупная
+// часть бандла), которые нужны только тому, кто реально открыл эту
+// вкладку — незачем грузить их в основной бандл на старте приложения.
+const TechDedupPage = lazy(() => import("./pages/TechDedupPage"));
 
 export interface TabDefinition {
   id: string;
