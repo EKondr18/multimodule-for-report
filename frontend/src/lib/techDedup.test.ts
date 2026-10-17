@@ -451,9 +451,9 @@ describe("removeDuplicates: выбор листа и структура", () => 
 });
 
 describe("removeDuplicates: характеризация расхождений с Python-версией (FLAG)", () => {
-  it("FLAG (for human review): \\w в JS — ASCII-only, поэтому суффикс-кириллица в номере теряется и заказы смешиваются", async () => {
-    // Регэксп №\s*[\w\d-]+ в JS не захватывает кириллицу, так что «№00012А» -> «№00012»
-    // и «№00012Б» -> «№00012». Python-вариант (\w — Unicode) различал бы их.
+  it("кириллический суффикс в номере наряда различает разные заказы (не ASCII-only \\w)", async () => {
+    // Регэксп №\s*[\p{L}\p{N}_-]+ с флагом u захватывает кириллицу, так что
+    // «№00012А» и «№00012Б» — два разных номера наряда, оба сохраняются.
     const file = makeInputFile({
       Данные: [
         HEADER,
@@ -465,6 +465,6 @@ describe("removeDuplicates: характеризация расхождений 
     const result = await removeDuplicates(file);
     const { rows } = await readResultRows(result.blob);
 
-    expect(dataKeys(rows).map((r) => r.mileage)).toEqual([2]);
+    expect(dataKeys(rows).map((r) => r.mileage)).toEqual([1, 2]);
   });
 });
