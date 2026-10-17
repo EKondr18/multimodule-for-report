@@ -176,10 +176,11 @@ def test_router_returns_500_when_conflicts_are_exhausted_and_writes_nothing(fake
             repo.put(path, repo.text(path))
 
     fake_repo.on_update = always_conflict
-    # FLAG (for human review): после исчерпания попыток исключение уходит из
-    # asyncio.gather необработанным -> 500 без понятного сообщения. Данные
-    # не испорчены (ничего не записано), но клиенту стоит ретраить.
+    # После исчерпания попыток роутер ловит GithubException и отдаёт чистый
+    # 503 (а не голый 500) — тот же статус, который fetchWithWakeup на
+    # фронтенде уже ретраит сам. Данные не испорчены (ничего не записано).
     response = upload([("31.01.26", "SU700", "B9")])
-    assert response.status_code == 500
+    assert response.status_code == 503
+    assert "конфликт" in response.json()["detail"].lower()
     assert fake_repo.text(MASTER_JAN) == before_master
     assert fake_repo.text(DATALENS_JAN) == before_datalens

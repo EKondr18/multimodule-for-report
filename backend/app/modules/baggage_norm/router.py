@@ -3,6 +3,7 @@ from io import BytesIO, StringIO
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from github import GithubException
 
 router = APIRouter(prefix="/api/baggage-norm", tags=["baggage-norm"])
 
@@ -194,17 +195,31 @@ async def process_weekly_file(file: UploadFile):
 
     commit_message = f"baggage_norm: добавлена выгрузка от {date.today().isoformat()} (+{len(df_new)} строк)"
 
-    await asyncio.gather(*[
-        asyncio.to_thread(
-            _process_month_sync,
-            m,
-            df_new[df_new["_month"] == m].drop(columns=["_month"]),
-            commit_message,
-            legacy_master,
-            legacy_datalens,
-        )
-        for m in months
-    ])
+    try:
+        await asyncio.gather(*[
+            asyncio.to_thread(
+                _process_month_sync,
+                m,
+                df_new[df_new["_month"] == m].drop(columns=["_month"]),
+                commit_message,
+                legacy_master,
+                legacy_datalens,
+            )
+            for m in months
+        ])
+    except GithubException as exc:
+        if exc.status in (409, 422):
+            # Все попытки _process_month_sync исчерпаны — кто-то другой
+            # (скорее всего параллельная повторная попытка того же
+            # запроса) непрерывно побеждает в гонке за этот же файл.
+            # Ничего не записано (см. _process_month_sync: конфликт
+            # ловится ДО записи второго файла), ретраить безопасно — 503,
+            # а не голый 500, чтобы fetchWithWakeup на фронтенде (которая
+            # уже ретраит именно такие статусы) подхватила это сама.
+            raise HTTPException(
+                503, "Не удалось сохранить файл — конфликт параллельной записи, повторите попытку"
+            ) from exc
+        raise
     _log("all months written")
 
     months_str = ", ".join(months)
