@@ -50,6 +50,11 @@ def _build_summary(
         end = pd.to_datetime(end_date)
     except ValueError as exc:
         raise HTTPException(400, f"Некорректная дата: {exc}") from exc
+    if pd.isna(start) or pd.isna(end):
+        # Пустая строка не роняет pd.to_datetime исключением — она тихо
+        # превращается в NaT, а "start > end" с NaT всегда False, так что
+        # эта проверка сама по себе не ловит пустые/отсутствующие даты.
+        raise HTTPException(400, "Не указана дата начала или окончания периода")
     if start > end:
         raise HTTPException(400, "Дата начала периода позже даты окончания")
 

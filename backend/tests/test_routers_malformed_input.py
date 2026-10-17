@@ -77,12 +77,12 @@ def test_quality_unknown_granularity_is_400():
     _assert_clean_client_error(response, 400)
 
 
-def test_quality_empty_start_date_is_silently_accepted_with_200():
-    # TODO: should be 400 (пустая дата -> NaT), currently 200 with empty tables.
-    # Сам роутер не меняем; фиксируем текущий ответ.
+def test_quality_empty_start_date_is_400():
+    # Пустая строка не роняет pd.to_datetime исключением — тихо превращается
+    # в NaT; роутер теперь явно проверяет pd.isna() и отдаёт понятный 400.
     response = client.post(QR, data={**QR_DATES, "start_date": ""}, files={"perron_file": XLSX})
-    assert response.status_code == 200
-    assert response.json()["tables"]
+    _assert_clean_client_error(response, 400)
+    assert "не указана дата" in response.json()["detail"].lower()
 
 
 @pytest.mark.parametrize("name, payload", [
