@@ -386,7 +386,8 @@ def read_lir_szv_file(file_obj: BytesIO) -> pd.DataFrame:
     result["reason_description"] = result["reason_description"].apply(
         lambda v: str(v).strip() if pd.notna(v) else ""
     )
-    result["has_violation"] = result["reason_description"].str.casefold() != NO_VIOLATIONS_TEXT.casefold()
+    reason_cf = result["reason_description"].str.casefold()
+    result["has_violation"] = (reason_cf != NO_VIOLATIONS_TEXT.casefold()) & (reason_cf != "")
     if "flight" in result.columns:
         result["flight"] = result["flight"].apply(lambda v: str(v).strip() if pd.notna(v) else None)
     else:

@@ -94,8 +94,8 @@ def test_lir_reader_canonicalizes_agents_and_flags_violations():
     assert len(df) == 5
     assert df["agent"].tolist()[:3] == ["Иванов Иван", "Иванов Иван", "Иванов Иван"]
     assert pd.isna(df["agent"].iloc[4])
-    # «без замечаний» — не нарушение; пустое описание — нарушение (FLAG ниже)
-    assert df["has_violation"].tolist() == [False, True, True, True, True]
+    # «без замечаний» и пустое описание — оба не нарушение
+    assert df["has_violation"].tolist() == [False, True, True, False, True]
 
 
 def test_lir_iso_string_dates_are_day_first_swapped():
@@ -112,12 +112,11 @@ def test_lir_iso_string_dates_are_day_first_swapped():
     assert df["date"].tolist() == [T("2026-05-01")]
 
 
-def test_lir_empty_reason_counts_as_violation():
-    # FLAG (for human review): пустая/NaN «Описание причины замечания»
-    # превращается в "" и трактуется как замечание (has_violation=True),
-    # т.к. проверяется только равенство с «без замечаний». Фиксируем как есть.
+def test_lir_empty_reason_does_not_count_as_violation():
+    # Пустая/NaN «Описание причины замечания» — это отсутствие записи, а не
+    # нарушение; has_violation=False, как и для явного «без замечаний».
     df = _lir()
-    assert bool(df.loc[3, "has_violation"]) is True
+    assert bool(df.loc[3, "has_violation"]) is False
     assert df.loc[3, "reason_description"] == ""
 
 
@@ -130,26 +129,28 @@ def test_build_lir_szv_table_month_counts_checks_and_violations():
 def test_build_lir_szv_table_quarter_spans_whole_period():
     df = _lir()
     rows = qr.build_lir_szv_table(df, *JAN_FEB, "quarter")
-    assert rows == [{"Период": "1 квартал 2026", "Кол-во проверок": 5, "Кол-во замечаний": 4}]
+    assert rows == [{"Период": "1 квартал 2026", "Кол-во проверок": 5, "Кол-во замечаний": 3}]
 
 
 def test_build_lir_szv_employee_detail_formats_flight_and_date():
     df = _lir()
     rows = qr.build_lir_szv_employee_detail(df, *JAN_FEB, "month")
-    # Сортировка по убыванию количества; агент без ФИО не попадает в таблицу
+    # Сортировка по убыванию количества; агент без ФИО не попадает в таблицу.
+    # У Петрова единственная запись (03.02.2026) — пустое описание, с фиксом
+    # не считается нарушением, поэтому Петров вообще не попадает в таблицу.
     assert rows == [
         {"ФИО Агента": "Иванов Иван", "Январь 2026": "2 (SU2 06.01.2026; SU3 20.01.2026)",
          "Февраль 2026": 0},
-        {"ФИО Агента": "Петров", "Январь 2026": 0, "Февраль 2026": "1 (03.02.2026)"},
     ]
 
 
 def test_build_lir_szv_top_employees_marks_in_period():
+    # Аналогично: у Петрова после фикса пустого описания не остаётся ни
+    # одного нарушения за всю историю файла, поэтому он не попадает в топ.
     df = _lir()
     rows = qr.build_lir_szv_top_employees(df, *JAN)
     assert rows == [
         {"ФИО Агента": "Иванов Иван", "Кол-во нарушений": 2, "За выбранный период": "❗"},
-        {"ФИО Агента": "Петров", "Кол-во нарушений": 1, "За выбранный период": ""},
     ]
 
 
