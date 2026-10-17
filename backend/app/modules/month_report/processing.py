@@ -424,13 +424,20 @@ def _year_label(ts: pd.Timestamp) -> str:
     return str(ts.year)
 
 
+# Бакеты ниже выравниваются на начало календарного месяца/квартала/года
+# (current = ...replace(day=1) и т.п.) — это нужно, чтобы следующая граница
+# считалась от начала периода, а не от произвольного дня start. Каждый
+# bucket_start при этом обрезается до max(current, start): без этого первый
+# бакет начинался бы с 1-го числа периода, даже если start — в середине
+# месяца, и build_violations_appeals_table (единственный потребитель
+# _period_buckets) засчитывал бы в «Январь» дни ДО запрошенного start.
 def _month_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
     buckets = []
     current = start.replace(day=1)
     while current <= end:
         next_month = (current + pd.DateOffset(months=1)).replace(day=1)
         bucket_end = min(next_month - pd.Timedelta(days=1), end)
-        buckets.append((current, bucket_end))
+        buckets.append((max(current, start), bucket_end))
         current = next_month
     return buckets
 
@@ -445,7 +452,7 @@ def _quarter_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Ti
         q_end_month = q_start_month + 2
         next_q = (current + pd.DateOffset(months=3)).replace(day=1)
         bucket_end = min(next_q - pd.Timedelta(days=1), end)
-        buckets.append((current, bucket_end))
+        buckets.append((max(current, start), bucket_end))
         current = next_q
         q_start_month = current.month
     return buckets
@@ -457,7 +464,7 @@ def _year_buckets(start: pd.Timestamp, end: pd.Timestamp) -> list[tuple[pd.Times
     while current <= end:
         next_year = current.replace(year=current.year + 1)
         bucket_end = min(next_year - pd.Timedelta(days=1), end)
-        buckets.append((current, bucket_end))
+        buckets.append((max(current, start), bucket_end))
         current = next_year
     return buckets
 

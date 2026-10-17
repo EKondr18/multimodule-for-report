@@ -331,39 +331,38 @@ def test_claims_sums_amounts_with_filters_and_rounding():
 # Period helpers and the top-level contract
 # ---------------------------------------------------------------------------
 
-def test_month_buckets_start_at_calendar_month_start_not_requested_start():
-    # FLAG (for human review): первый интервал начинается с 1-го числа месяца,
-    # а не с start (_month_buckets: start.replace(day=1)). Конец обрезается по end.
+def test_month_buckets_clip_first_start_to_requested_start():
+    # Первый интервал обрезается до start (а не до 1-го числа месяца);
+    # конец по-прежнему обрезается по end.
     assert mr._month_buckets(T("2026-01-15"), T("2026-03-02")) == [
-        (T("2026-01-01"), T("2026-01-31")),
+        (T("2026-01-15"), T("2026-01-31")),
         (T("2026-02-01"), T("2026-02-28")),
         (T("2026-03-01"), T("2026-03-02")),
     ]
 
 
-def test_violations_appeals_counts_days_before_requested_start_in_first_bucket():
-    # FLAG (for human review): следствие предыдущего теста — в таблице 2
-    # (единственной, которая использует бакеты) нарушения за 1–14 января
-    # попадают в «Январь», хотя период начинается 15 января. Таблицы 3–20
-    # используют start/end напрямую и этой ошибки не имеют.
+def test_violations_appeals_excludes_days_before_requested_start():
+    # Таблица 2 больше не считает дни до запрошенного start — бакет
+    # «Январь» теперь начинается 15.01 (как start), а не с 1-го числа, так
+    # что нарушение от 05.01 (до начала периода) в счёт не идёт.
     perron = _perron([
         ["2026-01-05", "с виной", "ДСТ", "Регистрация", "", "e1"],   # до начала периода
         ["2026-01-20", "с виной", "ДСТ", "Регистрация", "", "e2"],
     ])
     rows = mr.build_violations_appeals_table(perron, None, None, T("2026-01-15"), T("2026-01-31"), "month")
-    assert rows == [{"Период": "Январь 2026", mr.COL_COMBINED: 2, mr.COL_APPEALS_NO_THANKS: mr.NOT_UPLOADED}]
+    assert rows == [{"Период": "Январь 2026", mr.COL_COMBINED: 1, mr.COL_APPEALS_NO_THANKS: mr.NOT_UPLOADED}]
 
 
-def test_quarter_and_year_buckets_also_start_on_period_boundary():
-    # FLAG (for human review): то же для кварталов и годов — первый интервал
-    # начинается с 1-го числа квартала / 1 января, а не с start.
+def test_quarter_and_year_buckets_clip_first_start_to_period_boundary():
+    # Первый интервал обрезается до start (а не до 1-го числа квартала/года);
+    # остальные интервалы по-прежнему идут по календарным границам.
     assert mr._quarter_buckets(T("2026-02-10"), T("2026-08-03")) == [
-        (T("2026-01-01"), T("2026-03-31")),
+        (T("2026-02-10"), T("2026-03-31")),
         (T("2026-04-01"), T("2026-06-30")),
         (T("2026-07-01"), T("2026-08-03")),
     ]
     assert mr._year_buckets(T("2025-06-01"), T("2026-02-03")) == [
-        (T("2025-01-01"), T("2025-12-31")),
+        (T("2025-06-01"), T("2025-12-31")),
         (T("2026-01-01"), T("2026-02-03")),
     ]
 
