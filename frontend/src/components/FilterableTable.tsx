@@ -84,8 +84,14 @@ export default function FilterableTable({
     }
   };
 
+  // См. SummaryTable — тот же non-color cue: `title` озвучивается
+  // скринридерами и виден дальтоникам по фокусу/наведению, не только через
+  // цвет фона/полосы.
+  const isOutlier = (globalIdx: number, colKey: string) => outlierCells.has(outlierKey(globalIdx, colKey));
   const outlierClass = (globalIdx: number, colKey: string) =>
-    outlierCells.has(outlierKey(globalIdx, colKey)) ? "cell-outlier" : undefined;
+    isOutlier(globalIdx, colKey) ? "cell-outlier" : undefined;
+  const outlierTitle = (globalIdx: number, colKey: string) =>
+    isOutlier(globalIdx, colKey) ? "Статистический выброс: значение сильно отклоняется от среднего по столбцу" : undefined;
 
   return (
     <div>
@@ -136,7 +142,11 @@ export default function FilterableTable({
             {pageRows.map((row, idx) => (
               <tr key={idx}>
                 {columns.map((col) => (
-                  <td key={col.key} className={outlierClass(pageStart + idx, col.key)}>
+                  <td
+                    key={col.key}
+                    className={outlierClass(pageStart + idx, col.key)}
+                    title={outlierTitle(pageStart + idx, col.key)}
+                  >
                     {row[col.key]}
                   </td>
                 ))}

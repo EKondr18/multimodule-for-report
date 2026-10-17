@@ -115,8 +115,15 @@ export default function SummaryTable({ table, highlightOutliers = true }: Props)
     );
   }
 
+  // Подсветка выбросов — это сигнал поверх цвета (фон + полоса), что само по
+  // себе не воспринимается дальтониками и не озвучивается скринридерами.
+  // `title` добавляет непривязанную к цвету текстовую подсказку по фокусу/
+  // наведению и в доступном дереве.
+  const isOutlier = (rowIdx: number, col: string) => outlierCells.has(outlierKey(rowIdx, col));
   const outlierClass = (rowIdx: number, col: string) =>
-    outlierCells.has(outlierKey(rowIdx, col)) ? "cell-outlier" : undefined;
+    isOutlier(rowIdx, col) ? "cell-outlier" : undefined;
+  const outlierTitle = (rowIdx: number, col: string) =>
+    isOutlier(rowIdx, col) ? "Статистический выброс: значение сильно отклоняется от среднего по столбцу" : undefined;
 
   const renderGroupedBody = (groups: RowGroup[]) => {
     let flatIdx = 0;
@@ -126,7 +133,7 @@ export default function SummaryTable({ table, highlightOutliers = true }: Props)
         return [(
           <tr key={`${gi}-empty`}>
             {spanCols.map((col) => (
-              <td key={col} className={outlierClass(idx, col)}>
+              <td key={col} className={outlierClass(idx, col)} title={outlierTitle(idx, col)}>
                 {formatDisplay(group[col] as string | number)}
               </td>
             ))}
@@ -139,12 +146,12 @@ export default function SummaryTable({ table, highlightOutliers = true }: Props)
         return (
           <tr key={`${gi}-${di}`}>
             {di === 0 && spanCols.map((col) => (
-              <td key={col} rowSpan={group.details.length} className={outlierClass(idx, col)}>
+              <td key={col} rowSpan={group.details.length} className={outlierClass(idx, col)} title={outlierTitle(idx, col)}>
                 {formatDisplay(group[col] as string | number)}
               </td>
             ))}
             {detailCols.map((col) => (
-              <td key={col} className={outlierClass(idx, col)}>
+              <td key={col} className={outlierClass(idx, col)} title={outlierTitle(idx, col)}>
                 {formatDisplay(detail[col])}
               </td>
             ))}
@@ -162,7 +169,7 @@ export default function SummaryTable({ table, highlightOutliers = true }: Props)
           <button className="btn btn-sm" onClick={handleCopy}>
             {copied ? "✓ Скопировано" : "Копировать"}
           </button>
-          <button className="btn btn-sm" onClick={handleExport} disabled={exporting}>
+          <button className="btn btn-sm" onClick={handleExport} disabled={exporting || flatRows.length === 0}>
             {exporting ? "Экспорт…" : "Экспорт в Excel"}
           </button>
         </div>
@@ -182,7 +189,7 @@ export default function SummaryTable({ table, highlightOutliers = true }: Props)
               : table.rows.map((row, idx) => (
                   <tr key={idx}>
                     {table.columns.map((col) => (
-                      <td key={col} className={outlierClass(idx, col)}>
+                      <td key={col} className={outlierClass(idx, col)} title={outlierTitle(idx, col)}>
                         {formatDisplay(row[col])}
                       </td>
                     ))}
