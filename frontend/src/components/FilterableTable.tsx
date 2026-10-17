@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { exportRowsToXlsx, sanitizeFilename } from "../lib/exportTableToXlsx";
+import { computeOutlierCells, looksLikeIdentifierColumn, outlierKey } from "../lib/outliers";
 
 interface Column {
   key: string;
@@ -10,11 +12,23 @@ interface Props {
   rows: Record<string, string>[];
   pageSize?: number;
   totals?: Record<string, string | number>;
+  /** См. SummaryTable — та же статистическая эвристика, включена по умолчанию. */
+  highlightOutliers?: boolean;
+  /** Заголовок таблицы, используется для имени файла при экспорте. */
+  title?: string;
 }
 
-export default function FilterableTable({ columns, rows, pageSize = 25, totals }: Props) {
+export default function FilterableTable({
+  columns,
+  rows,
+  pageSize = 25,
+  totals,
+  highlightOutliers = true,
+  title = "table",
+}: Props) {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false);
 
   const uniqueValues = useMemo(() => {
     const result: Record<string, string[]> = {};
@@ -34,75 +48,114 @@ export default function FilterableTable({ columns, rows, pageSize = 25, totals }
     );
   }, [rows, filters, columns]);
 
+  const analyzedColumns = useMemo(
+    () => columns.filter((c) => !looksLikeIdentifierColumn(c.key) && !looksLikeIdentifierColumn(c.label)).map((c) => c.key),
+    [columns]
+  );
+
+  // Статистика считается по всему отфильтрованному набору (не только по
+  // текущей странице) — так z-score не "прыгает" при переключении страниц.
+  const outlierCells = useMemo(() => {
+    if (!highlightOutliers) return new Set<string>();
+    return computeOutlierCells(filtered, analyzedColumns);
+  }, [filtered, analyzedColumns, highlightOutliers]);
+
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pageCount - 1);
-  const pageRows = filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const pageStart = currentPage * pageSize;
+  const pageRows = filtered.slice(pageStart, pageStart + pageSize);
 
   const setFilter = (key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(0);
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const exportRows = filtered.map((row) => columns.map((col) => row[col.key] ?? ""));
+      await exportRowsToXlsx(
+        `${sanitizeFilename(title)}.xlsx`,
+        columns.map((c) => c.label),
+        exportRows
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const outlierClass = (globalIdx: number, colKey: string) =>
+    outlierCells.has(outlierKey(globalIdx, colKey)) ? "cell-outlier" : undefined;
+
   return (
     <div>
-      <table className="preview">
-        <thead>
-          <tr>
-            {columns.map((col) => (
-              <th key={col.key}>{col.label}</th>
-            ))}
-          </tr>
-          <tr className="filters">
-            {columns.map((col) => {
-              const options = uniqueValues[col.key];
-              const useSelect = options.length <= 30;
-              return (
-                <th key={col.key}>
-                  {useSelect ? (
-                    <select
-                      value={filters[col.key] ?? ""}
-                      onChange={(e) => setFilter(col.key, e.target.value)}
-                    >
-                      <option value="">Все</option>
-                      {options.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      placeholder="Фильтр..."
-                      value={filters[col.key] ?? ""}
-                      onChange={(e) => setFilter(col.key, e.target.value)}
-                    />
-                  )}
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {pageRows.map((row, idx) => (
-            <tr key={idx}>
+      <div className="table-actions" style={{ marginBottom: 10, justifyContent: "flex-end", display: "flex" }}>
+        <button className="btn btn-sm" onClick={handleExport} disabled={exporting || filtered.length === 0}>
+          {exporting ? "Экспорт…" : "Экспорт в Excel"}
+        </button>
+      </div>
+      <div className="table-scroll">
+        <table className="preview">
+          <thead>
+            <tr>
               {columns.map((col) => (
-                <td key={col.key}>{row[col.key]}</td>
+                <th key={col.key}>{col.label}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-        {totals && (
-          <tfoot>
-            <tr className="totals">
-              {columns.map((col, idx) => (
-                <td key={col.key}>
-                  {idx === 0 ? "Итого" : (totals[col.key] ?? "")}
-                </td>
-              ))}
+            <tr className="filters">
+              {columns.map((col) => {
+                const options = uniqueValues[col.key];
+                const useSelect = options.length <= 30;
+                return (
+                  <th key={col.key}>
+                    {useSelect ? (
+                      <select
+                        value={filters[col.key] ?? ""}
+                        onChange={(e) => setFilter(col.key, e.target.value)}
+                      >
+                        <option value="">Все</option>
+                        {options.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        placeholder="Фильтр..."
+                        value={filters[col.key] ?? ""}
+                        onChange={(e) => setFilter(col.key, e.target.value)}
+                      />
+                    )}
+                  </th>
+                );
+              })}
             </tr>
-          </tfoot>
-        )}
-      </table>
+          </thead>
+          <tbody>
+            {pageRows.map((row, idx) => (
+              <tr key={idx}>
+                {columns.map((col) => (
+                  <td key={col.key} className={outlierClass(pageStart + idx, col.key)}>
+                    {row[col.key]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+          {totals && (
+            <tfoot>
+              <tr className="totals">
+                {columns.map((col, idx) => (
+                  <td key={col.key}>
+                    {idx === 0 ? "Итого" : (totals[col.key] ?? "")}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
       <div className="pagination">
         <button
           className="btn"
