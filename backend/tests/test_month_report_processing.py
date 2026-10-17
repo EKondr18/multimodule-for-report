@@ -199,17 +199,20 @@ def test_avk_categories_normalized_matching_and_group_order():
     assert got["Нарушение ФО/этики"] == 2
     assert got["Трудовая дисциплина и безопасность"] == 1
     assert got["Посадка"] == 0
-    # Порядок строк — порядок _CATEGORY_GROUPS
-    assert [r["Категория"] for r in rows] == [label for label, _ in mr._CATEGORY_GROUPS]
+    # Порядок строк — порядок _CATEGORY_GROUPS, с ИТОГО в конце
+    assert [r["Категория"] for r in rows] == [label for label, _ in mr._CATEGORY_GROUPS] + ["ИТОГО"]
 
 
-def test_avk_categories_has_no_total_row_despite_docstring():
-    # FLAG (for human review): docstring build_avk_categories_table говорит
-    # «Bottom row: ИТОГО», но функция ИТОГО не добавляет (total считается и
-    # не используется). Тест фиксирует текущее поведение — строки ИТОГО нет.
-    avk = _avk([["2026-01-05", "с виной", "x", "Регистрация", "", ""]])
-    labels = [r["Категория"] for r in mr.build_avk_categories_table(avk, *JAN)]
-    assert "ИТОГО" not in labels
+def test_avk_categories_has_total_row():
+    # Докстринг build_avk_categories_table обещает «Bottom row: ИТОГО» — total
+    # считался, но не добавлялся в rows. Теперь строка ИТОГО действительно
+    # добавляется, с суммой по всем категориям.
+    avk = _avk([
+        ["2026-01-05", "с виной", "x", "Регистрация", "", ""],
+        ["2026-01-06", "с виной", "x", "Посадка", "", ""],
+    ])
+    rows = mr.build_avk_categories_table(avk, *JAN)
+    assert rows[-1] == {"Категория": "ИТОГО", "Кол-во нарушений": 2}
 
 
 # ---------------------------------------------------------------------------

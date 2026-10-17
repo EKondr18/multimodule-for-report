@@ -731,6 +731,7 @@ def build_avk_categories_table(
         total += c
         rows.append({"Категория": label, "Кол-во нарушений": c})
 
+    rows.append({"Категория": "ИТОГО", "Кол-во нарушений": total})
     return rows
 
 
