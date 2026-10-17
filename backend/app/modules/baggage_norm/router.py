@@ -149,6 +149,7 @@ async def process_weekly_file(file: UploadFile):
     import asyncio
     import time
 
+    from app.core.upload_limits import read_upload_limited
     from app.modules.baggage_norm.processing import read_weekly_excel
 
     t0 = time.perf_counter()
@@ -159,7 +160,7 @@ async def process_weekly_file(file: UploadFile):
     if not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(400, "Ожидается файл Excel (.xlsx/.xls)")
 
-    raw = await file.read()
+    raw = await read_upload_limited(file)
     _log(f"file read from request ({len(raw)/1e6:.2f} MB)")
     try:
         df_new = read_weekly_excel(BytesIO(raw))

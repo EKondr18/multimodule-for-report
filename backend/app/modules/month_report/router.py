@@ -5,6 +5,7 @@ from io import BytesIO
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.request_cache import dedup
+from app.core.upload_limits import read_upload_limited
 
 router = APIRouter(prefix="/api/month-report", tags=["month-report"])
 
@@ -96,16 +97,16 @@ async def month_summary(
 
     if perron_file is not None and perron_file.filename:
         _check_excel(perron_file, "Нарушения на перроне")
-        perron_bytes = await perron_file.read()
+        perron_bytes = await read_upload_limited(perron_file)
     if avk_file is not None and avk_file.filename:
         _check_excel(avk_file, "Нарушения в АВК")
-        avk_bytes = await avk_file.read()
+        avk_bytes = await read_upload_limited(avk_file)
     if appeals_file is not None and appeals_file.filename:
         _check_excel(appeals_file, "Обращения")
-        appeals_bytes = await appeals_file.read()
+        appeals_bytes = await read_upload_limited(appeals_file)
     if production_file is not None and production_file.filename:
         _check_excel(production_file, "Производственные показатели")
-        production_bytes = await production_file.read()
+        production_bytes = await read_upload_limited(production_file)
 
     # Дедупликация повторных попыток fetchWithWakeup — см. комментарий в
     # quality_report/router.py и app/core/request_cache.py.

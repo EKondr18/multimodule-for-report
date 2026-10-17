@@ -6,6 +6,7 @@ from io import BytesIO
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 
 from app.core.request_cache import dedup
+from app.core.upload_limits import read_upload_limited
 
 router = APIRouter(prefix="/api/baggage-comments", tags=["baggage-comments"])
 
@@ -92,8 +93,8 @@ async def process_files(
         if not events_file.filename.lower().endswith((".xlsx", ".xls")):
             raise HTTPException(400, "«События по багажу» — ожидается excel-файл")
 
-    norm_bytes = await norm_file.read()
-    events_bytes = await events_file.read()
+    norm_bytes = await read_upload_limited(norm_file)
+    events_bytes = await read_upload_limited(events_file)
 
     # Дедупликация повторных попыток fetchWithWakeup — см. комментарий в
     # quality_report/router.py и app/core/request_cache.py.

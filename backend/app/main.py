@@ -58,8 +58,10 @@ async def health_echo_file(file: UploadFile):
     зависает ли сам приём/разбор multipart-тела на этом хостинге."""
     import time
 
+    from app.core.upload_limits import read_upload_limited
+
     t0 = time.perf_counter()
-    raw = await file.read()
+    raw = await read_upload_limited(file)
     print(f"[health/echo-file] received {len(raw)} bytes in {time.perf_counter() - t0:.2f}s", flush=True)
     return {"status": "ok", "size": len(raw)}
 

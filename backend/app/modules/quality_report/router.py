@@ -5,6 +5,7 @@ from io import BytesIO
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.request_cache import dedup
+from app.core.upload_limits import read_upload_limited
 
 router = APIRouter(prefix="/api/quality-report", tags=["quality-report"])
 
@@ -126,19 +127,19 @@ async def quality_summary(
 
     if perron_file is not None and perron_file.filename:
         _check_excel_filename(perron_file, "Нарушения на перроне")
-        perron_bytes = await perron_file.read()
+        perron_bytes = await read_upload_limited(perron_file)
     if avk_file is not None and avk_file.filename:
         _check_excel_filename(avk_file, "Нарушения в АВК")
-        avk_bytes = await avk_file.read()
+        avk_bytes = await read_upload_limited(avk_file)
     if grh_file is not None and grh_file.filename:
         _check_excel_filename(grh_file, "Проверки GRH")
-        grh_bytes = await grh_file.read()
+        grh_bytes = await read_upload_limited(grh_file)
     if lir_file is not None and lir_file.filename:
         _check_excel_filename(lir_file, "Мониторинг LIR/СЗВ")
-        lir_bytes = await lir_file.read()
+        lir_bytes = await read_upload_limited(lir_file)
     if pab_file is not None and pab_file.filename:
         _check_excel_filename(pab_file, "Проверки PAB")
-        pab_bytes = await pab_file.read()
+        pab_bytes = await read_upload_limited(pab_file)
 
     # Дедупликация: fetchWithWakeup на фронтенде при обрыве соединения
     # повторяет тот же запрос (те же файлы, те же параметры) до 10 раз
