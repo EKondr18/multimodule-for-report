@@ -552,7 +552,9 @@ def _classify_reason(reason: str | None) -> str | None:
     text = str(reason).lower()
     if "несвоевременное торможение" in text:
         return REASON_KVS_BRAKING
-    if "вне ракурса" in text or "сок" in text:
+    # "сок" — самостоятельное сокращение (напр. «нет видео СОК»), а не
+    # подстрока: без \b совпадало бы с любым словом вроде «высокая», «соки».
+    if "вне ракурса" in text or re.search(r"\bсок\b", text):
         return REASON_OUT_OF_VIEW
     return REASON_AOOPO
 

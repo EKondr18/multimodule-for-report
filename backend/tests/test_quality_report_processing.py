@@ -194,10 +194,12 @@ def test_classify_reason_maps_known_phrases():
     assert qr._classify_reason(None) is None
 
 
-def test_classify_reason_substring_sok_false_positive():
-    # FLAG (for human review): проверка «сок» — подстрока, поэтому любое слово,
-    # где она встречается («высокая», «соки»), уходит в «вне ракурса».
-    assert qr._classify_reason("Высокая скорость") == qr.REASON_OUT_OF_VIEW
+def test_classify_reason_sok_matches_only_as_whole_word():
+    # «сок» матчится только как отдельное слово/аббревиатура (\bсок\b) —
+    # «высокая» больше не уходит в «вне ракурса» случайно, а «нет видео СОК»
+    # по-прежнему матчится как было задумано.
+    assert qr._classify_reason("Высокая скорость") == qr.REASON_AOOPO
+    assert qr._classify_reason("Нет видео СОК") == qr.REASON_OUT_OF_VIEW
 
 
 def test_installation_table_counts_by_reason_bucket_per_month():
